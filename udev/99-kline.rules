@@ -1,0 +1,5 @@
+# Stable symlink /dev/kline for the K-Line USB KKL cable.
+# This board's cable is an FTDI FT232R (0403:6001, serial A50285BI).
+# Matching on vendor:product is enough while it is the only such adapter;
+# add ATTRS{serial}=="A50285BI" if you attach a second FTDI device.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", SYMLINK+="kline"

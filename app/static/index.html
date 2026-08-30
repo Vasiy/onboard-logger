@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <!-- one per scheme: a single light value painted a white bar over the dark theme in iOS Safari -->
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#17212b" media="(prefers-color-scheme: dark)" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Onboard Logger</title>
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/static/icon-180.png" />
+  <link rel="manifest" href="/static/manifest.json" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🏍️<span class="brand__text"> Onboard Logger</span></div>
+    <div id="statusPill" class="pill pill--init">
+      <span class="dot"></span>
+      <span id="statusText">…</span>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab is-active" data-tab="logger" data-i18n="tab.logger" role="tab" aria-selected="true" aria-controls="tab-logger">Logger</button>
+    <button class="tab" data-tab="firmware" data-i18n="tab.firmware" role="tab" aria-selected="false" aria-controls="tab-firmware">Firmware</button>
+    <button class="tab" data-tab="logs" data-i18n="tab.files" role="tab" aria-selected="false" aria-controls="tab-logs">K-Line log files</button>
+    <button class="tab" data-tab="testing" data-i18n="tab.testing" role="tab" aria-selected="false" aria-controls="tab-testing">Testing</button>
+    <button class="tab" data-tab="config" data-i18n="tab.config" role="tab" aria-selected="false" aria-controls="tab-config">Config</button>
+  </nav>
+
+  <div id="ecuBanner" class="ecu-banner" hidden></div>
+
+  <main>
+    <!-- ============ LOGGER ============ -->
+    <section id="tab-logger" class="tabpanel is-active" role="tabpanel">
+      <div class="card">
+        <div class="rec-row">
+          <div class="rec__info">
+            <div class="rec__title" data-i18n="rec.decoded">Parameter log (decoded)</div>
+            <div id="decMeta" class="rec__meta">—</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="decToggle" />
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="rec-row">
+          <div class="rec__info">
+            <div class="rec__title" data-i18n="rec.raw">Raw log</div>
+            <div id="rawMeta" class="rec__meta">—</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="rawToggle" />
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="card meta-grid">
+        <div><span class="k" data-i18n="meta.ecu">ECU</span><span id="ecuId" class="v">—</span></div>
+        <div><span class="k" data-i18n="meta.bus">Bus speed</span><span id="busBaud" class="v">—</span></div>
+        <div><span class="k" data-i18n="meta.poll">Poll rate</span><span id="pollHz" class="v">—</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card__head">
+          <span data-i18n="params.title">Parameters</span>
+          <div class="card__actions">
+            <div class="seg" id="paramMode">
+              <button type="button" data-pm="view" class="on" data-i18n="params.view">read</button>
+              <button type="button" data-pm="edit" data-i18n="params.edit">pick</button>
+            </div>
+            <button id="selAll" class="mini" data-i18n="sel.all">all</button>
+            <button id="selNone" class="mini" data-i18n="sel.none">none</button>
+          </div>
+        </div>
+        <div id="params" class="params" aria-live="polite"></div>
+        <p id="paramsEmpty" class="hint" data-i18n="params.viewEmpty" hidden>Nothing picked yet.</p>
+        <p class="hint" data-i18n="params.hint">Checked parameters are shown live. All raw bus frames are always logged.</p>
+      </div>
+
+      <div class="card scan-card">
+        <div class="scan-head">
+          <span class="scan-title" data-i18n="scan.title">Scan</span>
+          <div class="scan-bar">
+            <label class="scan-ctl"><span data-i18n="scan.auto">auto-stop</span>
+              <select id="scanDur">
+                <option value="120">2 min</option>
+                <option value="180" selected>3 min</option>
+                <option value="300">5 min</option>
+                <option value="0">∞</option>
+              </select>
+            </label>
+            <label class="scan-ctl"><span data-i18n="scan.frame">frame</span>
+              <select id="scanFmt">
+                <option value="2" selected data-i18n="scan.fmtAddr">addr (fast)</option>
+                <option value="both" data-i18n="scan.fmtBoth">both</option>
+              </select>
+            </label>
+            <label class="switch switch--sm">
+              <input type="checkbox" id="scanToggle" />
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+        <div id="scanBody" hidden>
+          <div id="scanMeta" class="rec__meta" data-i18n="scan.hint">Sweeps 0x21 &lt;rli&gt; 0x00–0xFF (both framings), logs scan-*.ndjson + wide CSV. Run with the engine idling, blip the throttle. Finds every readable rli.</div>
+          <div id="markBar" class="mark-bar">
+            <div class="mark-row">
+              <span class="mark-lbl" data-i18n="scan.mark">Mark event</span>
+              <button class="mini mark-btn" data-mark="sidestand" data-i18n="scan.mSidestand">side stand</button>
+              <button class="mini mark-btn" data-mark="clutch" data-i18n="scan.mClutch">clutch</button>
+              <button class="mini mark-btn" data-mark="gear" data-i18n="scan.mGear">gear</button>
+              <button class="mini mark-btn" data-mark="kill" data-i18n="scan.mKill">kill switch</button>
+              <label class="scan-ctl"><span data-i18n="scan.mDelay">delay</span>
+                <select id="markDelay">
+                  <option value="0" selected>0 s</option>
+                  <option value="3">3 s</option>
+                  <option value="5">5 s</option>
+                  <option value="10">10 s</option>
+                </select>
+              </label>
+              <span id="markCount" class="mark-count" hidden></span>
+            </div>
+            <div class="mark-row mark-row--custom">
+              <input id="markText" type="text" data-i18n-ph="scan.mCustomPh" placeholder="own label, e.g. fan on">
+              <button id="markBtn" class="mini" data-i18n="scan.mAdd">add</button>
+            </div>
+            <p class="hint" data-i18n="scan.mDelayNote">Working alone? Set a delay: press the marker, walk to the switch and flip it when the countdown hits zero — the marker is written at that instant, not when you pressed.</p>
+            <p class="hint" data-i18n="scan.mCustomHint">Anything you flip or press that is not in the row above: type what you did and press “add”. The label goes into the scan log at that instant, so the rli that changes around it is the channel carrying that state.</p>
+          </div>
+          <p class="hint" data-i18n="scan.markHint">While a scan runs, press a marker at the exact moment you flip a switch. The marker lands in the scan log, so the rli that changed across it is the status channel.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ FIRMWARE ============ -->
+    <section id="tab-firmware" class="tabpanel" role="tabpanel">
+      <div id="fwNa" class="banner err" data-i18n="fw.na" hidden>5am_util is not installed.</div>
+
+      <div class="card">
+        <div class="card__head">
+          <span data-i18n="fw.state">State</span>
+          <div class="card__actions">
+            <label class="inline" style="margin:0;font-size:13px"><input type="checkbox" id="fwVerbose" style="width:18px;height:18px" /> <span data-i18n="fw.verbose">Verbose log</span></label>
+            <button id="fwCancel" class="mini" data-i18n="fw.cancel" hidden>Cancel</button>
+          </div>
+        </div>
+        <div id="fwState" class="v" style="font-size:16px">—</div>
+        <pre id="fwLog" class="fw-log"></pre>
+      </div>
+
+      <div class="card">
+        <div class="card__head"><span data-i18n="fw.read">Read from ECU</span></div>
+        <label><span data-i18n="fw.readName">File name (optional)</span><input id="fwReadName" type="text" placeholder="dump-*.bin" /></label>
+        <div class="fw-ecu">
+          <div class="fw-ecu-lbl" data-i18n="fw.ecuInfo">Current ECU (saved into the .txt on read)</div>
+          <pre id="fwEcuInfo" class="fw-ecu-desc">—</pre>
+        </div>
+        <button id="fwReadBtn" class="btn btn--info" data-i18n="fw.read">Read from ECU</button>
+        <div id="fwSuggest" class="fw-suggest" hidden>
+          <div class="hint" data-i18n="fw.suggestHint">The image identifies itself as another calibration. Rename it?</div>
+          <input id="fwSuggestName" type="text" />
+          <div class="card__actions">
+            <button id="fwSuggestOk" class="mini" data-i18n="fw.rename">Rename</button>
+            <button id="fwSuggestNo" class="mini" data-i18n="fw.keepName">Keep name</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__head"><span data-i18n="fw.write">Write to ECU</span></div>
+        <label><span data-i18n="fw.selectFile">Firmware file</span>
+          <select id="fwWriteSelect"></select>
+        </label>
+        <pre id="fwWriteDesc" class="fw-desc" hidden></pre>
+        <div class="banner warn" data-i18n="fw.warn" style="margin:14px 0 0">⚠ Flashing can brick the ECU.</div>
+        <div id="fwOverrideActive" class="banner err" style="margin:10px 0 0" hidden data-i18n="fw.overrideActive">⚠ The firmware guard is switched off in Config → System.</div>
+        <div id="fwGuard" class="banner" style="margin:10px 0 0" hidden></div>
+        <div id="fwSizeWarn" class="banner err" style="margin:10px 0 0" hidden></div>
+        <button id="fwWriteBtn" class="btn btn--danger" data-i18n="fw.write">Write to ECU</button>
+      </div>
+
+      <div class="card">
+        <div class="card__head">
+          <span data-i18n="fw.descBlock">Firmware description</span>
+          <button id="fwDescSave" class="mini" data-i18n="fw.saveDesc" disabled>Save</button>
+        </div>
+        <div id="fwDescName" class="hint" style="margin:0 0 8px">—</div>
+        <textarea id="fwDesc" class="fw-desc-edit" spellcheck="false" disabled></textarea>
+      </div>
+
+      <div class="card">
+        <div class="card__head"><span data-i18n="fw.files">Firmware files on device</span></div>
+        <div class="fw-tools">
+          <label class="mini"><span data-i18n="fw.upload">Upload .bin / .zip</span><input id="fwUpload" type="file" accept=".bin,.zip" hidden /></label>
+          <button id="fwDownloadBtn" class="mini" data-i18n="fw.download">Download .bin</button>
+          <button id="fwDiffBtn" class="mini" data-i18n="fw.diff">Diff 2 .bin</button>
+          <button id="fwDeleteBtn" class="mini mini--danger" data-i18n="fw.deleteBtn">Delete .bin</button>
+        </div>
+        <div id="fwDiffResult" class="hint"></div>
+        <div class="fwrow fwrow--head" id="fwSort">
+          <span></span>
+          <button data-s="name" class="col-name"><span data-i18n="logs.name">Name</span><span class="arrow"></span></button>
+          <button data-s="mtime" class="on col-date"><span data-i18n="logs.date">Date</span><span class="arrow">▼</span></button>
+          <button data-s="size" class="col-size"><span data-i18n="logs.size">Size</span><span class="arrow"></span></button>
+        </div>
+        <div id="fwList" class="logs filelist"></div>
+        <div id="fwFree" class="diskfree"></div>
+      </div>
+
+      <div class="card">
+        <div class="card__head"><span data-i18n="fw.catalogTitle">Known calibrations</span></div>
+        <p class="hint" data-i18n="fw.catalogNote">Which bike a calibration code belongs to. Entries you add here are stored on the board and survive an update; the shipped ones can be shadowed but not deleted.</p>
+        <details id="fwCatalogBox" class="fw-cat-box">
+          <summary><span data-i18n="fw.catalogShow">Browse the catalog</span><span id="fwCatCount" class="fw-cat-count"></span></summary>
+          <input id="fwCatSearch" type="search" class="fw-cat-search" data-i18n-ph="fw.catalogSearch" placeholder="Search by code" />
+          <div id="fwCatalogList" class="fw-catalog"></div>
+        </details>
+        <div class="fw-catalog-form">
+          <label><span data-i18n="fw.catalogCode">Code (prefix)</span><input id="fwCatCode" type="text" placeholder="23ECCLGPSM" /></label>
+          <label><span data-i18n="fw.catalogBrand">Manufacturer</span><input id="fwCatBrand" type="text" placeholder="Moto Morini" /></label>
+          <label><span data-i18n="fw.catalogModel">Model</span><input id="fwCatModel" type="text" placeholder="Granpasso 1200" /></label>
+          <label><span data-i18n="fw.catalogSpace">Source</span>
+            <select id="fwCatSpace">
+              <option value="image" data-i18n="fw.spaceImage">Code inside a firmware file</option>
+              <option value="live" data-i18n="fw.spaceLive">Drawing read from the ECU</option>
+            </select>
+          </label>
+          <button id="fwCatSave" class="mini" data-i18n="fw.catalogSave">Save</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ TESTING ============ -->
+    <section id="tab-testing" class="tabpanel" role="tabpanel">
+      <div class="card">
+        <div class="card__head"><span data-i18n="test.faultTitle">Fault codes (DTC)</span></div>
+        <p class="hint" id="testConnHint" data-i18n="test.needConn">Requires a live ECU connection (Logger tab must show “connected”). Not available during a Full parameter scan.</p>
+        <p class="hint"><span id="testModeBadge" class="mode-badge" data-i18n="test.modeOff">Diagnostic session: not started</span> <span data-i18n="test.modeNote">— started automatically on the first test (<code>83 03 00 FF 00 FF 00</code> + <code>10 81</code>), exactly as GuzziDiag/IAWDiag do at connect.</span></p>
+        <div class="card__actions" style="margin:10px 0">
+          <button id="dtcReadBtn" class="mini" data-i18n="test.read">Read fault codes</button>
+          <button id="dtcClearBtn" class="mini mini--danger" data-i18n="test.clear">Clear fault codes</button>
+          <button id="dtcCopyBtn" class="mini" hidden data-i18n="test.copy">Copy</button>
+        </div>
+        <div id="dtcResult" class="dtc-result"></div>
+        <details class="test-notes"><summary data-i18n="test.details">What this does</summary>
+          <p><b data-i18n="test.read">Read fault codes</b> — <span data-i18n="test.readNote">Reads stored/current diagnostic trouble codes (SAE code + status) via ReadDTCByStatus <code>18 00 FF 00</code>. Read-only, changes nothing.</span></p>
+          <p><b data-i18n="test.clear">Clear fault codes</b> — <span data-i18n="test.clearNote">Erases stored DTCs from ECU memory via ClearDiagnosticInformation <code>14 FF 00</code>. Codes reappear if the fault is still present. Does not touch adaptations, tuning or firmware.</span></p>
+        </details>
+      </div>
+      <div class="card">
+        <div class="card__head"><span data-i18n="test.adaptTitle">Adaptation resets</span></div>
+        <p class="hint" data-i18n="test.adaptWarn">⚠ Engine OFF (kill-switch), ignition ON. Verified for IAW 5AM from the GuzziDiag reverse.</p>
+        <div class="card__actions adapt-actions">
+          <button id="tpsResetBtn" class="mini mini--danger" data-i18n="test.tps">Reset TPS</button>
+          <div class="tps-meter" title="0x34 Throttle">
+            <div class="tps-track"><div id="tpsFill" class="tps-fill"></div></div>
+            <div id="tpsVal" class="tps-val">—</div>
+          </div>
+          <button id="adaptResetBtn" class="mini mini--danger" data-i18n="test.adapt">Reset self-adaptation</button>
+        </div>
+        <div id="adaptResult" class="dtc-result"></div>
+        <details class="test-notes"><summary data-i18n="test.details">What this does</summary>
+          <p><b data-i18n="test.tps">Reset TPS</b> — <span data-i18n="test.tpsNote">Resets the throttle-position adaptation (closed-throttle reference) via StartRoutine <code>31 21</code>. Do it engine-off / ignition-on; the ECU relearns idle afterwards.</span></p>
+          <p><b data-i18n="test.adapt">Reset self-adaptation</b> — <span data-i18n="test.adaptNote">Clears the ECU self-learned fuel/idle adaptation (Selbstadaption) via <code>30 7E 04</code>. The ECU relearns over the next rides.</span></p>
+        </details>
+      </div>
+      <div class="card">
+        <div class="card__head"><span data-i18n="test.actTitle">Actuator tests</span></div>
+        <p class="hint" data-i18n="test.actWarn">⚠ Engine OFF (kill-switch), ignition ON. Each button energizes a real output (fuel/spark/pump) for a moment, then auto-off. Confirm each.</p>
+        <div class="act-bar">
+          <label for="actPulse" data-i18n="test.pulseLen">Pulse length</label>
+          <input id="actPulse" type="number" min="0.5" max="30" step="0.5" value="5">
+          <span data-i18n="unit.sec">s</span>
+          <button id="actStopBtn" class="mini mini--danger" hidden data-i18n="test.stop">Stop</button>
+          <span id="actRunning" class="act-running" hidden></span>
+        </div>
+        <div id="actList" class="act-list"></div>
+        <div id="actResult" class="dtc-result"></div>
+        <p class="hint" data-i18n="test.actNote">Momentary test: sends 30 &lt;id&gt; 07, then 00 when the pulse length runs out. The board owns that timing, so the output is released even if the browser goes away. LocalID→name from JPDiag [Tests]; command byte from the GuzziDiag reverse.</p>
+        <p class="hint" data-i18n="test.actFootnote">* Channel exists in the IAW actuator set but may not be present on this bike — the ECU will most likely answer with an error. Harmless to try.</p>
+      </div>
+      <div class="card">
+        <div class="card__head"><span data-i18n="test.profTitle">ECU profiles (reference)</span></div>
+        <p class="hint" data-i18n="test.profNote">Bike → ECU → protocol from the GuzziDiag model table, plus the command set recovered for each ECU family. Reference only — this logger targets the IAW 5AM; nothing here is sent automatically.</p>
+        <label for="profSelect" data-i18n="test.profPick">Model</label>
+        <select id="profSelect"></select>
+        <div id="profInfo" class="prof-info"></div>
+      </div>
+      <div class="card">
+        <div class="card__head"><span data-i18n="test.statusTitle">Status decoders (reference)</span></div>
+        <p class="hint" data-i18n="test.statusNote">IAW status/bitfield meanings from JPDiag. Reference for decoding status channels once their rli is identified.</p>
+        <div id="statusMaps" class="status-ref"></div>
+      </div>
+    </section>
+
+    <!-- ============ CONFIG ============ -->
+    <section id="tab-config" class="tabpanel" role="tabpanel">
+      <div id="cfgBanner" class="banner" hidden></div>
+      <p class="hint" data-i18n="cfg.autosave">Settings save themselves as you change them. Wi-Fi, network, DHCP and hostname are the exception: they restart the access point, so they go out only when you press “Save &amp; apply”.</p>
+
+      <form id="cfgForm">
+        <fieldset class="card">
+          <legend data-i18n="cfg.wifi">Wi-Fi</legend>
+          <div id="wifiStatus" class="wifi-status">—</div>
+
+          <div class="mode-switch">
+            <span class="mode-lbl" id="modeLblAp" data-i18n="cfg.modeAp">Access point</span>
+            <label class="switch"><input type="checkbox" id="modeToggle" /><span class="slider"></span></label>
+            <span class="mode-lbl" id="modeLblClient" data-i18n="cfg.modeClient">Client</span>
+            <input type="hidden" name="wifi.mode" value="ap" />
+          </div>
+          <p class="hint" id="wifiModeHint" data-i18n="cfg.modeApHint">The board serves its own network and hands out addresses. This is what you connect to on the bike.</p>
+
+          <!-- ---------- access point ---------- -->
+          <div class="mode-ap">
+            <label><span data-i18n="cfg.ssid">Network name (SSID)</span><input name="wifi.ssid" type="text" maxlength="32" /></label>
+            <label><span data-i18n="cfg.password">Password</span><input name="wifi.password" type="text" minlength="0" maxlength="63" /></label>
+            <div class="row">
+              <label><span data-i18n="cfg.channel">Channel</span>
+                <select id="channelSelect">
+                  <option value="auto" data-i18n="opt.auto">Auto</option>
+                  <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+                  <option value="4">4</option><option value="5">5</option><option value="6">6</option>
+                  <option value="7">7</option><option value="8">8</option><option value="9">9</option>
+                  <option value="10">10</option><option value="11">11</option><option value="12">12</option>
+                  <option value="13">13</option>
+                </select>
+              </label>
+            <label><span data-i18n="cfg.country">Country</span>
+              <select name="wifi.country">
+                <option value="DE">DE — Germany</option>
+                <option value="AT">AT — Austria</option>
+                <option value="AU">AU — Australia</option>
+                <option value="BE">BE — Belgium</option>
+                <option value="BG">BG — Bulgaria</option>
+                <option value="CA">CA — Canada</option>
+                <option value="CH">CH — Switzerland</option>
+                <option value="CZ">CZ — Czechia</option>
+                <option value="DK">DK — Denmark</option>
+                <option value="ES">ES — Spain</option>
+                <option value="FI">FI — Finland</option>
+                <option value="FR">FR — France</option>
+                <option value="GB">GB — United Kingdom</option>
+                <option value="GR">GR — Greece</option>
+                <option value="HU">HU — Hungary</option>
+                <option value="IE">IE — Ireland</option>
+                <option value="IT">IT — Italy</option>
+                <option value="JP">JP — Japan</option>
+                <option value="NL">NL — Netherlands</option>
+                <option value="NO">NO — Norway</option>
+                <option value="PL">PL — Poland</option>
+                <option value="PT">PT — Portugal</option>
+                <option value="RO">RO — Romania</option>
+                <option value="RS">RS — Serbia</option>
+                <option value="RU">RU — Russia</option>
+                <option value="SE">SE — Sweden</option>
+                <option value="SK">SK — Slovakia</option>
+                <option value="TR">TR — Türkiye</option>
+                <option value="UA">UA — Ukraine</option>
+                <option value="US">US — United States</option>
+              </select>
+            </label>
+            </div>
+            <div class="wifi-chart-wrap">
+              <div class="wifi-chart-head">
+                <span data-i18n="cfg.chartTitle">Channel occupancy (startup scan)</span>
+                <span id="wifiScanMeta" class="hint"></span>
+              </div>
+              <div id="wifiChart" class="wifi-chart"></div>
+            </div>
+          </div>
+
+          <!-- ---------- client ---------- -->
+          <div class="mode-client" hidden>
+            <label><span data-i18n="cfg.cSsid">Network to join (SSID)</span><input name="wifi.client.ssid" type="text" maxlength="32" /></label>
+            <div class="scan-net">
+              <button type="button" id="netScanBtn" class="mini" data-i18n="cfg.scanNets">Scan networks</button>
+              <span id="netScanMeta" class="hint"></span>
+            </div>
+            <div id="netList" class="net-list"></div>
+            <label><span data-i18n="cfg.cPassword">Network password</span><input name="wifi.client.password" type="text" minlength="0" maxlength="63" /></label>
+            <p class="hint" data-i18n="cfg.cFallback">If the join does not come up within 45 s (wrong password, network out of range) the board puts its own access point back and switches the saved mode back to “Access point”.</p>
+          </div>
+        </fieldset>
+
+        <fieldset class="card">
+          <legend data-i18n="cfg.netBlock">Network</legend>
+          <label><span data-i18n="cfg.hostname">Hostname</span><input name="hostname" type="text" /></label>
+          <p class="hint" data-i18n="cfg.hostnameHint">Hostname change applies after reboot.</p>
+
+          <!-- ---------- addresses served by the board (AP) ---------- -->
+          <div class="net-ap">
+            <div class="row">
+              <label><span data-i18n="cfg.ip">IP address</span><input name="network.ap_ip" type="text" /></label>
+              <label><span data-i18n="cfg.prefix">Prefix (/n)</span><input name="network.prefix" type="number" min="8" max="30" /></label>
+            </div>
+            <label><span data-i18n="cfg.apGateway">Router address (optional)</span><input name="network.gateway" type="text" placeholder="—" /></label>
+            <p class="hint" data-i18n="cfg.apGatewayHint">Leave empty: the access point routes nowhere, so clients are told there is no default route.</p>
+            <label class="inline"><input name="dhcp.enabled" type="checkbox" /> <span data-i18n="cfg.dhcp">DHCP server (Wi-Fi only)</span></label>
+            <div class="row">
+              <label><span data-i18n="cfg.poolStart">Pool from</span><input name="dhcp.pool_start" type="text" /></label>
+              <label><span data-i18n="cfg.poolEnd">Pool to</span><input name="dhcp.pool_end" type="text" /></label>
+            </div>
+            <label><span data-i18n="cfg.lease">Lease</span><input name="dhcp.lease" type="text" /></label>
+          </div>
+
+          <!-- ---------- address taken from the joined network (client) ---------- -->
+          <div class="net-client" hidden>
+            <div class="rec-row">
+              <div class="rec__info">
+                <div class="rec__title" data-i18n="cfg.dhcpClient">DHCP client</div>
+                <div class="rec__meta" data-i18n="cfg.dhcpClientHint">The joined network assigns the address. Turn off to set it by hand.</div>
+              </div>
+              <label class="switch"><input type="checkbox" id="dhcpClientToggle" checked /><span class="slider"></span></label>
+              <input type="hidden" name="wifi.client.ipv4" value="dhcp" />
+            </div>
+            <div class="client-static">
+              <div class="row">
+                <label><span data-i18n="cfg.ip">IP address</span><input name="wifi.client.ip" type="text" /></label>
+                <label><span data-i18n="cfg.mask">Network mask</span><input id="clientMask" type="text" placeholder="255.255.255.0" /></label>
+              </div>
+              <label><span data-i18n="cfg.cGateway">Router address</span><input name="wifi.client.gateway" type="text" /></label>
+              <input type="hidden" name="wifi.client.prefix" value="24" />
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset class="card">
+          <legend data-i18n="cfg.kline">K-Line bus</legend>
+          <div class="cfg-row2">
+            <label><span data-i18n="cfg.baud">Bus speed</span>
+              <select name="kline.baud">
+                <option value="auto" data-i18n="opt.auto">Auto</option>
+                <option value="4800">4800</option>
+                <option value="9600">9600</option>
+                <option value="10400">10400</option>
+                <option value="14400">14400</option>
+                <option value="15625">15625</option>
+                <option value="19200">19200</option>
+                <option value="38400">38400</option>
+                <option value="57600">57600</option>
+              </select>
+            </label>
+            <label><span data-i18n="cfg.init">Init</span>
+              <select name="kline.init">
+                <option value="fast" data-i18n="opt.fastinit">Fast init</option>
+                <option value="slow" data-i18n="opt.slowinit">Slow (5-baud)</option>
+              </select>
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset class="card">
+          <legend data-i18n="cfg.logging">Logging defaults</legend>
+          <label class="inline"><input name="logging.decoded_default" type="checkbox" /> <span data-i18n="cfg.decDefault">Parameter log on by default</span></label>
+          <label class="inline"><input name="logging.raw_default" type="checkbox" /> <span data-i18n="cfg.rawDefault">Raw log on by default</span></label>
+        </fieldset>
+
+        <fieldset class="card">
+          <legend data-i18n="cfg.system">System</legend>
+          <label class="inline"><input name="system.auto_time_sync" type="checkbox" />
+            <span data-i18n="cfg.autoTime">Set the clock from the first client after power-up</span></label>
+          <label class="inline"><input name="system.fw_guard_override" type="checkbox" />
+            <span data-i18n="cfg.fwOverride">Allow writing a firmware that does not match this ECU</span></label>
+          <p class="hint" data-i18n="cfg.fwOverrideHint">Off by default. The check compares the calibration in the image with the one the ECU reports and blocks a write only when both are known and belong to different bikes. It cannot tell a good tune from a bad one — it only stops the wrong motorcycle's firmware.</p>
+          <p class="hint" data-i18n="cfg.autoTimeHint">The board has no battery-backed clock. With this on, the first browser that opens the UI after a power-up sets the date, time and timezone — once per power-up, and only if the two clocks differ by more than 2 s.</p>
+          <div class="time-row">
+            <div class="time-info">
+              <div><span class="k" data-i18n="cfg.timeBoard">Board time</span><span id="timeBoard" class="v">—</span></div>
+              <div><span class="k" data-i18n="cfg.timeBrowser">This device</span><span id="timeBrowser" class="v">—</span></div>
+            </div>
+            <button type="button" id="timeSyncBtn" class="mini" data-i18n="cfg.timeSync">Sync from this device</button>
+          </div>
+          <div id="timeMeta" class="hint">—</div>
+          <!-- device-local preference (localStorage), not board config: the rider
+               on a sunlit road needs light, the same board at night needs dark -->
+          <label><span data-i18n="cfg.theme">Appearance</span>
+            <select id="themeSelect">
+              <option value="auto" data-i18n="theme.auto">Follow the device</option>
+              <option value="light" data-i18n="theme.light">Light</option>
+              <option value="dark" data-i18n="theme.dark">Dark</option>
+            </select>
+          </label>
+          <label><span data-i18n="cfg.locale">Language</span>
+            <select id="localeSelect" name="locale">
+              <option value="en">English</option>
+              <option value="de">Deutsch</option>
+              <option value="es">Español</option>
+              <option value="fr">Français</option>
+              <option value="it">Italiano</option>
+              <option value="nl">Nederlands</option>
+              <option value="bg">Български</option>
+              <option value="ru">Русский</option>
+            </select>
+          </label>
+        </fieldset>
+
+        <p id="cfgNetDirty" class="hint cfg-dirty" hidden data-i18n="cfg.netDirty">Network settings changed — press “Save &amp; apply” to send them (the AP restarts, you may need to reconnect).</p>
+        <button type="submit" class="btn btn--primary" data-i18n="cfg.save">Save &amp; apply</button>
+      </form>
+
+      <!-- network fields do not autosave; the Save button sits at the end of a long
+           form, so the pending count follows the scroll -->
+      <div id="cfgDirtyBar" class="dirty-bar" hidden>
+        <span id="cfgDirtyText" class="dirty-bar__text">—</span>
+        <div class="dirty-bar__acts">
+          <button type="button" id="cfgRevert" class="mini" data-i18n="cfg.revert">Discard</button>
+          <button type="button" id="cfgApply" class="btn btn--primary" data-i18n="cfg.save">Save &amp; apply</button>
+        </div>
+      </div>
+
+      <div class="card danger">
+        <div class="card__head"><span data-i18n="cfg.power">Power</span></div>
+        <div class="row">
+          <button id="btnReboot" class="btn btn--warn" data-i18n="cfg.reboot">Reboot</button>
+          <button id="btnShutdown" class="btn btn--danger" data-i18n="cfg.shutdown">Shutdown</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ LOGS ============ -->
+    <section id="tab-logs" class="tabpanel" role="tabpanel">
+      <div class="card">
+        <div class="card__head"><span data-i18n="logs.title">K-Line logs</span><button id="logsRefresh" class="mini" data-i18n="logs.refresh">refresh</button></div>
+        <div class="toolbar">
+          <div class="seg" id="logFilter">
+            <button data-f="all" class="on" data-i18n="logs.all">Show all</button>
+            <button data-f="decoded" data-i18n="logs.decoded">Decoded</button>
+            <button data-f="raw" data-i18n="logs.raw">Raw</button>
+          </div>
+          <label class="inline grow" style="margin:0;font-size:13px;justify-content:flex-end">
+            <input type="checkbox" id="logZip" style="width:18px;height:18px" /> <span data-i18n="logs.zip">Auto-zip finished logs</span>
+          </label>
+        </div>
+        <div class="fw-tools">
+          <button id="logsDownloadBtn" class="mini" data-i18n="logs.download">Download</button>
+          <button id="logsPreviewBtn" class="mini" data-i18n="logs.preview">Preview</button>
+          <button id="logsDeleteBtn" class="mini mini--danger" data-i18n="logs.delete">Delete</button>
+        </div>
+        <div class="fwrow fwrow--head" id="logSort">
+          <span></span>
+          <button data-s="name" class="col-name"><span data-i18n="logs.name">Name</span><span class="arrow"></span></button>
+          <button data-s="mtime" class="on col-date"><span data-i18n="logs.date">Date</span><span class="arrow">▼</span></button>
+          <button data-s="size" class="col-size"><span data-i18n="logs.size">Size</span><span class="arrow"></span></button>
+        </div>
+        <div id="logsList" class="logs filelist"></div>
+        <div id="logsFree" class="diskfree"></div>
+      </div>
+
+      <div id="logChartCard" class="card chart-card" hidden>
+        <div class="card__head">
+          <span id="logChartName">—</span>
+          <button id="logChartClose" class="mini" data-i18n="logs.close">Close</button>
+        </div>
+        <canvas id="logChart" class="chart"></canvas>
+        <p class="hint" data-i18n="logs.chartHint">Wheel = zoom · drag = pan · each series normalized to its max</p>
+        <div id="logChartVars" class="chart-vars"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/i18n.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

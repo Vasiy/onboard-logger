@@ -1,0 +1,37 @@
+{
+  "_comment": "IAW status/bitfield decoders from JPDiag28c.ini. 'enum' = value maps to one label; 'bits' = value is a bitmask, list every set flag. 'base' = radix of the keys. Attach to a param in params.json via {\"map\":\"<name>\",\"map_type\":\"enum|bits\"} once the status-carrying rli is identified; the raw value is still logged.",
+  "maps": {
+    "motorstate": {
+      "type": "bits", "base": 16,
+      "values": {"01": "Power-On, engine OFF", "02": "Ignition ON, engine OFF", "04": "Engine running", "08": "Stalling", "10": "Power-Latch active", "20": "Power-Latch ended"}
+    },
+    "motor": {
+      "type": "bits", "base": 16,
+      "values": {"2000": "Exit cut-off (accel)", "1000": "Exit cut-off (steady)", "0800": "Exit cut-off", "0400": "In cut-off", "0200": "Entry to cut-off", "0100": "Running (decel)", "0080": "Running (accel)", "0040": "Steady running", "0020": "Running at min rpm", "0010": "Min rpm at crank", "0008": "Accel at crank", "0004": "Decel at crank", "0002": "Steady at crank", "0001": "Crank"}
+    },
+    "sidestand": {
+      "type": "enum", "base": 16,
+      "values": {"00": "Up", "01": "Down"}
+    },
+    "clutch": {
+      "type": "enum", "base": 16,
+      "values": {"00": "Engaged", "01": "Disengaged"}
+    },
+    "tps_state": {
+      "type": "bits", "base": 16,
+      "values": {"01": "TPS at minimum", "02": "TPS full open", "04": "TPS at middle"}
+    },
+    "gear": {
+      "type": "enum", "base": 16,
+      "values": {"00": "Neutral", "01": "Engaged"}
+    },
+    "onoff": {
+      "type": "enum", "base": 16,
+      "values": {"00": "OFF", "01": "ON"}
+    },
+    "immobilizer": {
+      "type": "enum", "base": 10,
+      "values": {"0": "ECU stored", "1": "ECU virgin", "2": "ECU doesn't allow start", "3": "Universal code received", "4": "not used", "5": "Backdoor code received", "6": "Erroneous key (10*6)", "7": "Code unknown", "8": "No code received"}
+    }
+  }
+}

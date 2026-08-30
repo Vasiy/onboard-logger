@@ -1,0 +1,132 @@
+{
+  "_comment": "IAW actuator tests (InputOutputControlByLocalIdentifier). Command: 30 <localid> 07 (activate) / 30 <localid> 00 (deactivate); positive response SID 0x70. LocalID->name from JPDiag28c.ini [Tests]; command byte 07/00 cross-confirmed from the GuzziDiag v0.61 reverse. This is the full IAW set (car + bike); a 2-cylinder Guzzi 5AM only has some of these physically (coils 1/2, injectors 1/2, fuel pump, tacho, stepper, O2 heaters, purge, warning lamp) — the rest simply NRC on that ECU. Momentary pulse (auto-deactivate) by default. WARNING: these energize real outputs (fuel/spark/pump) — engine off, ignition on. LocalID 0x20 (32) is NOT in the JPDiag [Tests] list: it was found in the IAWDiag family that carries the same 5AM actuator set (30 20 07), and the GuzziDiag 5AM button 'Leerlaufregelung' (View_61, dword_45D7F8 = sub_427BCF) has no body in the dump — 0x20 is the likely idle-control it drives. Unverified: listed with the '*' marker.",
+  "default_pulse_ms": 2500,
+  "actuators": [
+    {
+      "localid": 2,
+      "key": "coil1",
+      "name": "Coil (front cyl)",
+      "group": "ignition",
+      "bike": true
+    },
+    {
+      "localid": 3,
+      "key": "coil2",
+      "name": "Coil (rear cyl)",
+      "group": "ignition",
+      "bike": true
+    },
+    {
+      "localid": 8,
+      "key": "inj1",
+      "name": "Injector (front cyl)",
+      "group": "injection",
+      "bike": true
+    },
+    {
+      "localid": 9,
+      "key": "inj2",
+      "name": "Injector (rear cyl)",
+      "group": "injection",
+      "bike": true
+    },
+    {
+      "localid": 5,
+      "key": "fuelpump",
+      "name": "Fuel pump relay",
+      "group": "fuel",
+      "bike": true
+    },
+    {
+      "localid": 4,
+      "key": "stepper",
+      "name": "Idle stepper",
+      "group": "idle",
+      "bike": true
+    },
+    {
+      "localid": 6,
+      "key": "tacho",
+      "name": "Tachometer",
+      "group": "dash",
+      "bike": true
+    },
+    {
+      "localid": 14,
+      "key": "o2heat1",
+      "name": "Oxygen heater 1",
+      "group": "lambda",
+      "bike": true
+    },
+    {
+      "localid": 15,
+      "key": "o2heat2",
+      "name": "Oxygen heater 2",
+      "group": "lambda",
+      "bike": true
+    },
+    {
+      "localid": 16,
+      "key": "purge",
+      "name": "Canister purge valve",
+      "group": "emission",
+      "bike": true
+    },
+    {
+      "localid": 17,
+      "key": "warnlamp",
+      "name": "Warning lamp",
+      "group": "dash",
+      "bike": true
+    },
+    {
+      "localid": 18,
+      "key": "templamp",
+      "name": "Water-temp lamp",
+      "group": "dash",
+      "bike": false
+    },
+    {
+      "localid": 1,
+      "key": "acrelay",
+      "name": "A/C compressor relay",
+      "group": "other",
+      "bike": false
+    },
+    {
+      "localid": 10,
+      "key": "inj3",
+      "name": "Injector cyl 3",
+      "group": "injection",
+      "bike": false
+    },
+    {
+      "localid": 11,
+      "key": "inj4",
+      "name": "Injector cyl 4",
+      "group": "injection",
+      "bike": false
+    },
+    {
+      "localid": 12,
+      "key": "fan1",
+      "name": "Electric fan 1 relay",
+      "group": "cooling",
+      "bike": false
+    },
+    {
+      "localid": 13,
+      "key": "fan2",
+      "name": "Electric fan 2 relay",
+      "group": "cooling",
+      "bike": false
+    },
+    {
+      "localid": 32,
+      "key": "idle_ctl",
+      "name": "Idle control (unverified)",
+      "group": "idle",
+      "bike": false
+    }
+  ]
+}

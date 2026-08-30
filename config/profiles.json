@@ -1,0 +1,358 @@
+{
+  "_comment": "Bike -> ECU -> protocol presets recovered from the GuzziDiag V0.42 embedded INI ([Modells], byte_452348), plus the per-ECU command matrix from the GuzziDiag and IAWDiag decompiles. Reference data only: this logger targets the IAW 5AM and nothing here is dispatched automatically. 'verified_here' = confirmed on the author's own bike. Protocol tag (PF09/PF10/PF1C/PF2C/PF3C) is GuzziDiag's transport variant, it changes the K-line bring-up, not the service IDs.",
+  "protocols": {
+    "PF09": "oldest transport (P7/P8/16M)",
+    "PF10": "15M variant",
+    "PF1C": "IAW 5AM / 15RC standard KWP2000 transport",
+    "PF2C": "IAW 5AM 8V/4V variant",
+    "PF3C": "15M/15RC/5AM Bellagio variant"
+  },
+  "ecus": {
+    "5AM": {
+      "name": "Magneti Marelli IAW 5AM",
+      "verified_here": true,
+      "rli_range": [
+        "0x30",
+        "0x7F"
+      ],
+      "init": "fast (BREAK 25/25 ms) or 5-baud slow; then 81, then 83 03 00 FF 00 FF 00 + 10 81 for tests",
+      "poll": "21 <rli> -> 61 <rli> <value>, big-endian, value at offset 2, 1..3 bytes",
+      "dtc": {
+        "read": "18 00 FF 00",
+        "clear": "14 FF 00"
+      },
+      "resets": {
+        "tps": "31 21",
+        "self_adaptation": "30 7E 04"
+      },
+      "actuators": {
+        "coil_front": "0x02",
+        "coil_rear": "0x03",
+        "stepper": "0x04",
+        "fuel_pump": "0x05",
+        "tacho": "0x06",
+        "inj_front": "0x08",
+        "inj_rear": "0x09",
+        "idle_control?": "0x20"
+      },
+      "co_trim": {
+        "test": "30 15 07 <value>",
+        "store": "30 15 05 <value>",
+        "value": "signed -128..127",
+        "gate": "coolant >= 40 C, engine off",
+        "status": "recovered from GuzziDiag sub_41EFFC, NOT implemented and NOT sniff-verified"
+      },
+      "source": "GuzziDiag V0.42 sub_42D2DB case 5 + IAWDiag V0.52 family sub_41B3A7"
+    },
+    "15RC": {
+      "name": "IAW 15RC",
+      "verified_here": false,
+      "resets": {
+        "tps": "proprietary byte 0x89",
+        "self_adaptation": "proprietary byte 0x8A"
+      },
+      "note": "adaptations do NOT use KWP services: raw byte + echo handshake (GuzziDiag sub_405BEB)",
+      "source": "GuzziDiag V0.42 sub_429810 / sub_429826"
+    },
+    "MIUG3": {
+      "name": "MIU G3",
+      "verified_here": false,
+      "resets": {
+        "tps": "31 21"
+      },
+      "note": "KWP services, different transport layer (GuzziDiag sub_4173A7)",
+      "source": "GuzziDiag V0.42 sub_40AA8B / sub_40AAB5"
+    },
+    "7SM": {
+      "name": "IAW 7SM (California 1400)",
+      "verified_here": false,
+      "resets": {
+        "tps_learn": "31 23, then poll 33 23 every 500 ms (up to 20 times)"
+      },
+      "note": "full TPS learn procedure, not a plain reset",
+      "source": "GuzziDiag V0.42 sub_4035DE + sub_41CEB7"
+    },
+    "15M": {
+      "name": "IAW 15M",
+      "verified_here": false,
+      "source": "GuzziDiag [Modells]"
+    },
+    "16M": {
+      "name": "IAW 16M",
+      "verified_here": false,
+      "source": "GuzziDiag [Modells]"
+    },
+    "P7": {
+      "name": "IAW P7",
+      "verified_here": false,
+      "source": "GuzziDiag [Modells]"
+    },
+    "P8": {
+      "name": "IAW P8",
+      "verified_here": false,
+      "source": "GuzziDiag [Modells]"
+    }
+  },
+  "models": {
+    "Bellagio 940": {
+      "ecu": "5AM",
+      "protocol": "PF3C"
+    },
+    "Breva 750": {
+      "ecu": "15RC",
+      "protocol": "PF1C"
+    },
+    "Breva 850": {
+      "ecu": "5AM",
+      "protocol": "PF1C"
+    },
+    "Breva 1100": {
+      "ecu": "5AM",
+      "protocol": "PF1C"
+    },
+    "Breva 1100 ABS": {
+      "ecu": "5AM",
+      "protocol": "PF1C"
+    },
+    "Breva 1200": {
+      "ecu": "5AM",
+      "protocol": "PF1C"
+    },
+    "Breva 1200 ABS": {
+      "ecu": "5AM",
+      "protocol": "PF1C"
+    },
+    "California 1000i < 1993": {
+      "ecu": "P7",
+      "protocol": "PF09"
+    },
+    "California 1000i": {
+      "ecu": "P8",
+      "protocol": "PF09"
+    },
+    "California 1100i": {
+      "ecu": "P8",
+      "protocol": "PF09"
+    },
+    "California 1400": {
+      "ecu": "7SM",
+      "protocol": ""
+    },
+    "California Aluminum": {
+      "ecu": "15M",
+      "protocol": "PF3C"
+    },
+    "California CAT": {
+      "ecu": "15RC",
+      "protocol": "PF3C"
+    },
+    "California Classic": {
+      "ecu": "15RC",
+      "protocol": "PF3C"
+    },
+    "California EV < 2001": {
+      "ecu": "P8",
+      "protocol": "PF09"
+    },
+    "California EV > 2000": {
+      "ecu": "15M",
+      "protocol": "PF3C"
+    },
+    "California EV p.i.": {
+      "ecu": "15RC",
+      "protocol": "PF3C"
+    },
+    "California Jackal": {
+      "ecu": "15M",
+      "protocol": "PF3C"
+    },
+    "California Special": {
+      "ecu": "15M",
+      "protocol": "PF3C"
+    },
+    "California Special Sport": {
+      "ecu": "15M",
+      "protocol": "PF3C"
+    },
+    "California Stone": {
+      "ecu": "15M",
+      "protocol": "PF3C"
+    },
+    "California Titanium": {
+      "ecu": "15RC",
+      "protocol": "PF3C"
+    },
+    "California Vintage": {
+      "ecu": "15RC",
+      "protocol": "PF3C"
+    },
+    "Daytona 1000 < 1993": {
+      "ecu": "P7",
+      "protocol": "PF09"
+    },
+    "Daytona 1000": {
+      "ecu": "P8",
+      "protocol": "PF09"
+    },
+    "Daytona RS": {
+      "ecu": "16M",
+      "protocol": "PF09"
+    },
+    "Griso 850": {
+      "ecu": "5AM",
+      "protocol": "PF1C"
+    },
+    "Griso 1100": {
+      "ecu": "5AM",
+      "protocol": "PF1C"
+    },
+    "Griso 1200 8V": {
+      "ecu": "5AM",
+      "protocol": "PF2C"
+    },
+    "MGS-01 Corsa": {
+      "ecu": "15M",
+      "protocol": "PF09"
+    },
+    "Nevada Classic 750": {
+      "ecu": "15RC",
+      "protocol": "PF1C"
+    },
+    "Nevada Classic 750 S.E. 07": {
+      "ecu": "15RC",
+      "protocol": "PF1C"
+    },
+    "Nevada 750 S": {
+      "ecu": "15RC",
+      "protocol": "PF1C"
+    },
+    "Nevada": {
+      "ecu": "MIUG3",
+      "protocol": ""
+    },
+    "Nevada Anniversario": {
+      "ecu": "MIUG3",
+      "protocol": ""
+    },
+    "Norge 850": {
+      "ecu": "5AM",
+      "protocol": "PF1C"
+    },
+    "Norge 1200 T": {
+      "ecu": "5AM",
+      "protocol": "PF1C"
+    },
+    "Norge 1200 GT": {
+      "ecu": "5AM",
+      "protocol": "PF1C"
+    },
+    "Norge 1200 GTL": {
+      "ecu": "5AM",
+      "protocol": "PF1C"
+    },
+    "Quota 1000 < 1993": {
+      "ecu": "P7",
+      "protocol": "PF09"
+    },
+    "Quota 1000": {
+      "ecu": "P8",
+      "protocol": "PF09"
+    },
+    "Quota 1100 ES": {
+      "ecu": "15M",
+      "protocol": "PF10"
+    },
+    "Sport 1100i": {
+      "ecu": "16M",
+      "protocol": "PF3C"
+    },
+    "Sport Corsa": {
+      "ecu": "16M",
+      "protocol": "PF3C"
+    },
+    "Sport 1200": {
+      "ecu": "5AM",
+      "protocol": "PF1C"
+    },
+    "Sport 1200 ABS": {
+      "ecu": "5AM",
+      "protocol": "PF1C"
+    },
+    "Stelvio 1200 4V": {
+      "ecu": "5AM",
+      "protocol": "PF2C"
+    },
+    "Stelvio 1200 8V": {
+      "ecu": "5AM",
+      "protocol": "PF2C"
+    },
+    "V10 Centauro": {
+      "ecu": "16M",
+      "protocol": "PF09"
+    },
+    "V11 Ballabio Cat": {
+      "ecu": "15RC",
+      "protocol": "PF3C"
+    },
+    "V11 Cafè": {
+      "ecu": "15RC",
+      "protocol": "PF3C"
+    },
+    "V11 CAT": {
+      "ecu": "15RC",
+      "protocol": "PF3C"
+    },
+    "V11 LeMans 2002": {
+      "ecu": "15M",
+      "protocol": "PF3C"
+    },
+    "V11 LeMans Tenni": {
+      "ecu": "15M",
+      "protocol": "PF3C"
+    },
+    "V11 Sport": {
+      "ecu": "15M",
+      "protocol": "PF3C"
+    },
+    "V11 Sport Naked": {
+      "ecu": "15M",
+      "protocol": "PF3C"
+    },
+    "V11 Rosso Corsa": {
+      "ecu": "15M",
+      "protocol": "PF3C"
+    },
+    "V11 Rosso Mandello": {
+      "ecu": "15M",
+      "protocol": "PF3C"
+    },
+    "V11 Sport Scura": {
+      "ecu": "15M",
+      "protocol": "PF3C"
+    },
+    "V7 Classic": {
+      "ecu": "15RC",
+      "protocol": "PF1C"
+    },
+    "V7 Cafè": {
+      "ecu": "15RC",
+      "protocol": "PF1C"
+    },
+    "V7 Racer": {
+      "ecu": "15RC",
+      "protocol": "PF1C"
+    },
+    "V7 Racer > 2012": {
+      "ecu": "MIUG3",
+      "protocol": ""
+    },
+    "V7 Special": {
+      "ecu": "MIUG3",
+      "protocol": ""
+    },
+    "V7 Stone": {
+      "ecu": "MIUG3",
+      "protocol": ""
+    }
+  }
+}

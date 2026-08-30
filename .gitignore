@@ -1,0 +1,24 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+# runtime artifacts / captures
+*.ndjson
+/root-k-line/
+config/config.json
+*.log
+.DS_Store
+config/selected.json
+old_logs/
+config/fw_catalog.user.json
+
+# personal context dump for new chat sessions, not part of the project
+CONTEXT.md
+
+# board address / credentials for deploy.sh — never commit
+.deploy.env
+
+# decompiles of third-party tools — reference material, kept outside the repo
+*.exe.txt

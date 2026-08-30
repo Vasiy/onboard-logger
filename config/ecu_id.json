@@ -1,0 +1,11 @@
+{
+  "_comment": "ECU identification field offsets within the ReadEcuIdentification (0x1A 0x80) response payload (bytes after the SID echo + option byte). Drawing[0:11] and Hardware[11:22] are reliable for IAW5AM; Omologation/Software/Tester/Date offsets are best-guess — calibrate against a GuzziDiag-saved .txt if the values look off. Output mirrors GuzziDiag's .txt (CRLF).",
+  "fields": [
+    {"label": "Drawing", "offset": 0, "length": 11},
+    {"label": "Hardware", "offset": 11, "length": 11},
+    {"label": "Omologation", "offset": 22, "length": 12},
+    {"label": "Software", "offset": 34, "length": 12},
+    {"label": "Tester", "offset": 46, "length": 10},
+    {"label": "Date", "offset": 56, "length": 10}
+  ]
+}
