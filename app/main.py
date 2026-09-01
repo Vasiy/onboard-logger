@@ -12,6 +12,7 @@ import contextlib
 import functools
 import io
 import json
+import logging
 import re
 import shutil
 import zipfile
@@ -19,13 +20,15 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import (FileResponse, JSONResponse, PlainTextResponse,
+                               StreamingResponse)
 from fastapi.staticfiles import StaticFiles
 
 from .kline.ecu_id import load_fields, parse_desc
 from .kline.logger import KLineWorker
 from .web import system
 from .web.config_mgr import ConfigManager, REPO_DIR, _deep_merge
+from .web.diag import DiagLog
 from .web.wifi_scan import scan_networks
 from .web.firmware import FirmwareBlocked, FirmwareManager
 from .web import fw_catalog, fw_guard
@@ -268,6 +271,7 @@ led = Led()
 cm = ConfigManager()
 worker: KLineWorker | None = None
 fwm: FirmwareManager | None = None
+diag: DiagLog | None = None
 
 
 def _after_network(cfg: dict, rep: dict) -> None:
@@ -288,7 +292,10 @@ def _after_network(cfg: dict, rep: dict) -> None:
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
-    global worker, fwm
+    global worker, fwm, diag
+    # uvicorn configures only its own loggers; without this the diagnostics
+    # events never reach journald (and from there /var/log/syslog)
+    logging.basicConfig(level=logging.INFO, format="%(name)s %(message)s")
     cfg = cm.load()
 
     # Bring the AP up (idempotent) *after* the port is listening: hostapd waits up
@@ -306,6 +313,10 @@ async def lifespan(app: FastAPI):
     if not ecu_id_path.exists():
         ecu_id_path = REPO_DIR / "config" / "ecu_id.json"
     ecu_fields = load_fields(ecu_id_path)
+    diag = DiagLog(cfg["log_dir"], cfg.get("diag"),
+                   probe=lambda: {**(worker.stats() if worker else {}),
+                                  "link": state.snapshot().get("status", "")})
+    diag.start()
     worker = KLineWorker(
         port=cfg["kline"]["port"],
         params_path=_params_path(),
@@ -320,6 +331,7 @@ async def lifespan(app: FastAPI):
         init=cfg["kline"].get("init", "fast"),
         ecu_fields=ecu_fields,
         session_init=cfg.get("testing", {}).get("session_init", True),
+        diag=diag,
     )
     worker.start()
     # restore the parameter selection saved from a previous run (falls back to the
@@ -340,6 +352,9 @@ async def lifespan(app: FastAPI):
         ecu_fields=ecu_fields,
         guard=_guard_verdict,
         describe_image=_image_desc_lines,
+        log_dir=cfg["log_dir"],
+        diag=diag,
+        fw_size=int(cfg.get("firmware_size", DEFAULT_FW_SIZE)),
     )
     try:
         yield
@@ -347,6 +362,8 @@ async def lifespan(app: FastAPI):
         if worker is not None:
             worker.stop()
             worker.join(timeout=3.0)
+        if diag is not None:
+            diag.stop()
 
 
 app = FastAPI(title="Onboard Logger", lifespan=lifespan)
@@ -917,6 +934,8 @@ async def post_config(payload: dict):
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"error": str(exc)})
     cm.save(cfg)
+    if diag is not None:
+        diag.apply(cfg.get("diag"))
     if worker is not None:  # apply live, no reboot
         worker.set_zip_after(cfg.get("logging", {}).get("zip_after", False))
         kp, kn = prev.get("kline", {}), cfg.get("kline", {})
@@ -979,7 +998,18 @@ def post_time_auto(payload: dict):
 
 # -- logs ------------------------------------------------------------------
 def _log_kind(name: str) -> str:
+    if name.startswith("diag-"):
+        return "diag"
     return "raw" if (".raw.log" in name or name.endswith(".ndjson") or "-raw-" in name) else "decoded"
+
+
+def _is_ride_log(name: str) -> bool:
+    """What belongs in the Logs tab. Firmware operation logs deliberately do not:
+    they are a Config -> System affair, listed by /api/firmware/logs."""
+    if name.startswith("fw-"):
+        return False
+    return (name.endswith(".csv") or name.endswith(".raw.log") or name.endswith(".ndjson")
+            or name.endswith(".zip") or name.startswith("diag-"))
 
 
 @app.get("/api/logs")
@@ -990,7 +1020,7 @@ async def list_logs():
     if log_dir.is_dir():
         for p in log_dir.iterdir():
             n = p.name
-            if not (n.endswith(".csv") or n.endswith(".raw.log") or n.endswith(".ndjson") or n.endswith(".zip")):
+            if not _is_ride_log(n):
                 continue
             st = p.stat()
             files.append({
@@ -999,6 +1029,59 @@ async def list_logs():
             })
     files.sort(key=lambda f: f["mtime"], reverse=True)
     return {"dir": str(log_dir), "files": files, **_disk_free(log_dir)}
+
+
+@app.get("/api/diag.txt")
+def diag_text(lines: int = 200):
+    """The board diagnostics log as plain text, for a phone with no shell.
+
+    Carries the current health line plus the tail of the open file, so the
+    kernel's USB/Wi-Fi messages and our link events are read in one place.
+    """
+    if diag is None or not diag.enabled:
+        return PlainTextResponse("diagnostics log is off\n")
+    head = (f"# {diag.current_file()}  limit={diag.max_bytes // 1048576}MB "
+            f"keep={diag.keep} interval={diag.interval_s}s\n"
+            "# NOW " + diag.render(diag.health()) + "\n")
+    return PlainTextResponse(head + diag.tail(max(1, min(int(lines), 5000))) + "\n")
+
+
+@app.get("/api/firmware/logs")
+def firmware_logs():
+    """The verbose per-operation files, newest first. Config -> System shows these;
+    the Logs tab does not, so a flash log never hides among the ride logs."""
+    log_dir = Path(cm.load()["log_dir"])
+    files = []
+    if log_dir.is_dir():
+        for p in sorted(log_dir.glob("fw-*.log")):
+            st = p.stat()
+            files.append({"name": p.name, "size": st.st_size, "mtime": st.st_mtime,
+                          "op": p.name.split("-")[1] if "-" in p.name else ""})
+    files.sort(key=lambda f: f["mtime"], reverse=True)
+    return {"files": files[:40], "current": fwm._vlog_path.name if (fwm and fwm._vlog_path) else ""}
+
+
+@app.get("/api/firmware/log.txt")
+def firmware_log_text(lines: int = 400, file: str = ""):
+    """One firmware operation log as plain text (default: the latest one)."""
+    log_dir = Path(cm.load()["log_dir"]).resolve()
+    if file:
+        try:
+            name = _safe_name(file)
+        except ValueError:
+            return PlainTextResponse("bad name\n", status_code=400)
+        path = (log_dir / name).resolve()
+        if not name.startswith("fw-") or path.parent != log_dir or not path.is_file():
+            return PlainTextResponse("not found\n", status_code=404)
+    elif fwm is None or not fwm._vlog_path:
+        return PlainTextResponse("no firmware operation has run yet\n")
+    else:
+        path = Path(fwm._vlog_path)
+    try:
+        tail = path.read_text(errors="replace").splitlines()[-max(1, min(int(lines), 20000)):]
+    except OSError as exc:
+        return PlainTextResponse(f"{path.name}: {exc}\n")
+    return PlainTextResponse(f"# {path}\n" + "\n".join(tail) + "\n")
 
 
 @app.post("/api/logs/download")

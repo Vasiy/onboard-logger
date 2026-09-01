@@ -60,8 +60,10 @@ class KLineWorker(threading.Thread):
         ecu_fields=None,
         reconnect_delay: float = 2.0,
         session_init: bool = True,
+        diag=None,
     ):
         super().__init__(name="kline-worker", daemon=True)
+        self.diag = diag            # DiagLog or None; every call is best-effort
         self.port = port
         self._ecu_fields = ecu_fields or DEFAULT_FIELDS
         self.params_path = params_path
@@ -126,6 +128,13 @@ class KLineWorker(threading.Thread):
         self._act_key = ""
         self._act_until = 0.0        # monotonic deadline
         self._act_session: KWP2000Session | None = None
+
+        # per-request outcome tally, drained by the diagnostics health tick: a
+        # line that is starting to fail shows up here long before it drops
+        self._stat: dict[str, int] = {}
+        self._dec_rows = 0           # rows in the open decoded file
+        self._link_at = 0.0          # monotonic time the current link came up
+        self._last_fail = ""         # last connect failure, to log it only once
 
         self.pmap = ParamMap.load(params_path)
         # decoded log columns = selected parameters. Default: only the named
@@ -364,16 +373,35 @@ class KLineWorker(threading.Thread):
     def actuator_active(self) -> bool:
         return self._act_lid is not None
 
+    # -- diagnostics ------------------------------------------------------
+    def _diag(self, kind: str, **fields) -> None:
+        """Best-effort note into the board diagnostics log (may be disabled)."""
+        if self.diag is not None:
+            self.diag.event(kind, **fields)
+
+    def stats(self) -> dict:
+        """Drain the per-request tally for the diagnostics health tick.
+
+        A line going bad (loose K-Line ground, a dying adapter) raises `to`/`bad`
+        for a while before the link drops outright — worth seeing in the log.
+        """
+        s, self._stat = self._stat, {}
+        return {
+            "ok": s.get("ok", 0), "to": s.get("timeout", 0),
+            "nrc": s.get("nrc", 0), "bad": s.get("bad_frame", 0),
+            "rows": self._dec_rows if self._dec_fh is not None else "",
+        }
+
     # -- logging file management (worker thread) --------------------------
     def _reconcile_logging(self) -> None:
         if self._want_dec and self._dec_fh is None:
             self._open_dec()
         elif not self._want_dec and self._dec_fh is not None:
-            self._close_dec()
+            self._close_dec("disarmed")
         if self._want_raw and self._raw_fh is None:
             self._open_raw()
         elif not self._want_raw and self._raw_fh is not None:
-            self._close_raw()
+            self._close_raw("disarmed")
 
     def _open_dec(self) -> None:
         self.log_dir.mkdir(parents=True, exist_ok=True)
@@ -386,9 +414,11 @@ class KLineWorker(threading.Thread):
         header = "time," + ",".join(self._dec_cols) + "\n"
         self._dec_fh.write(header)
         self._dec_bytes = len(header)
+        self._dec_rows = 0
         self.state.set_decoded_file(str(self._dec_path), 0)
+        self._diag("log_open", file=self._dec_path.name, cols=len(self._dec_cols))
 
-    def _close_dec(self) -> None:
+    def _close_dec(self, reason: str = "link_lost") -> None:
         path = self._dec_path
         if self._dec_fh is not None:
             try:
@@ -397,6 +427,7 @@ class KLineWorker(threading.Thread):
             finally:
                 self._dec_fh = None
             self._maybe_zip(path)
+            self._diag("log_close", file=path.name, rows=self._dec_rows, reason=reason)
         self.state.set_decoded_file("", 0)
 
     def _open_raw(self) -> None:
@@ -407,7 +438,7 @@ class KLineWorker(threading.Thread):
         self._raw_bytes = 0
         self.state.set_raw_file(str(self._raw_path), 0)
 
-    def _close_raw(self) -> None:
+    def _close_raw(self, reason: str = "link_lost") -> None:
         path = self._raw_path
         if self._raw_fh is not None:
             try:
@@ -416,6 +447,7 @@ class KLineWorker(threading.Thread):
             finally:
                 self._raw_fh = None
             self._maybe_zip(path)
+            self._diag("raw_close", file=path.name, reason=reason)
         self.state.set_raw_file("", 0)
 
     def _maybe_zip(self, path: Path | None) -> None:
@@ -430,9 +462,9 @@ class KLineWorker(threading.Thread):
         except OSError:
             pass
 
-    def _close_all_logs(self) -> None:
-        self._close_dec()
-        self._close_raw()
+    def _close_all_logs(self, reason: str = "link_lost") -> None:
+        self._close_dec(reason)
+        self._close_raw(reason)
         self._close_scan()
 
     # -- rli-scan files ---------------------------------------------------
@@ -463,10 +495,10 @@ class KLineWorker(threading.Thread):
 
     def _roll_if_needed(self) -> None:
         if self._dec_fh is not None and self._dec_bytes >= MAX_LOG_BYTES:
-            self._close_dec()
+            self._close_dec("size")
             self._open_dec()
         if self._raw_fh is not None and self._raw_bytes >= MAX_LOG_BYTES:
-            self._close_raw()
+            self._close_raw("size")
             self._open_raw()
 
     def _write_decoded(self, values: dict) -> None:
@@ -478,6 +510,7 @@ class KLineWorker(threading.Thread):
         ) + "\n"
         self._dec_fh.write(row)
         self._dec_bytes += len(row)
+        self._dec_rows += 1
         self.state.inc_decoded_records()
 
     def _write_raw(self, rec: dict) -> None:
@@ -508,6 +541,7 @@ class KLineWorker(threading.Thread):
             connected = False
             clean = False
             session = None
+            err: Exception | None = None
             self.state.set_test_mode(False, "")
             try:
                 self.led.searching()
@@ -527,6 +561,11 @@ class KLineWorker(threading.Thread):
                     describe(session.ecu_id_raw, session.ecu_hw, self._ecu_fields))
                 self.led.connected()
                 self.state.set_status("connected", ecu_id or "")
+                self._link_at = time.monotonic()
+                self._last_fail = ""
+                self._diag("link_up", baud=baud,
+                           init="slow" if self._init_slow else "fast",
+                           ecu=(ecu_id or "?").split()[0] if ecu_id else "?")
                 with self._lock:
                     scan = self._scan_on
                 if scan:
@@ -536,6 +575,14 @@ class KLineWorker(threading.Thread):
                     self._poll_loop(session)
                 clean = True            # loop exited on request, link still alive
             except (KLineError, OSError) as exc:
+                err = exc
+                # a bike parked with the ignition off retries forever: log the
+                # first failure of a kind, not every 2 s attempt
+                if not connected and _friendly_error(exc) != self._last_fail:
+                    self._last_fail = _friendly_error(exc)
+                    self._diag("link_fail", err=type(exc).__name__,
+                               detail=str(exc)[:100], baud=baud,
+                               tty=int(Path(self.port).exists()))
                 self.state.set_status("error", _friendly_error(exc))
                 self.state.set_ecu_fields({})   # drop the ECU banner on disconnect
                 self.state.set_ecu_desc("")
@@ -546,6 +593,14 @@ class KLineWorker(threading.Thread):
                     session.end_link()  # 0x20 + 0x82, like both PC tools (best effort)
                 self.state.set_test_mode(False, "")
                 transport.close()
+                if connected:
+                    # the split of a ride's log into several files starts here:
+                    # whatever killed the link also ends the file
+                    self._diag("link_down",
+                               err=type(err).__name__ if err else "clean",
+                               detail=(str(err)[:100] if err else ""),
+                               up=round(time.monotonic() - self._link_at, 1),
+                               tty=int(Path(self.port).exists()))
                 self._close_all_logs()  # never keep logging once the link ends
             # rotate to the next candidate rate only if the initial link failed
             if not connected and self._auto_baud:
@@ -596,6 +651,7 @@ class KLineWorker(threading.Thread):
                     r = session.read_local(p.rli, with_addr=p.with_addr, timeout=timeout)
                     cache[key] = r
                     probes.append(r)
+                    self._stat[r["status"]] = self._stat.get(r["status"], 0) + 1
                 if r["status"] == "ok":
                     got_any = True
                     values[p.key] = p.decode(bytes.fromhex(r["data"]))
@@ -614,7 +670,7 @@ class KLineWorker(threading.Thread):
             if self._dec_restart:  # parameter selection changed -> roll decoded file
                 self._dec_restart = False
                 if self._dec_fh is not None:
-                    self._close_dec()
+                    self._close_dec("selection")
                     self._open_dec()
             self._reconcile_logging()
             self._roll_if_needed()

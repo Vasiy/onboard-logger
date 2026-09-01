@@ -456,6 +456,14 @@ label.is-dirty input, label.is-dirty select { border-color: var(--warn); }
 .fw-file__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--fg); }
 .logrow > .fwsel { width: 20px; height: 20px; accent-color: var(--accent); flex: none; margin: 0; }
 .fw-file__meta { display: flex; align-items: center; gap: 10px; flex: none; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+/* firmware operation logs, listed in Config -> System (never in the Logs tab) */
+.fw-logs { margin: 12px 0 4px; }
+.fw-logs .card__head { margin-bottom: 4px; }
+.fw-logs .logrow { gap: 8px; }
+.fw-logs .logrow > a:first-child { flex: 1; min-width: 0; font-size: 13px; }
+.fw-logs .logrow .mini { min-height: 28px; padding: 0 10px; font-size: 12px; flex: none; }
+.fw-logs .lmeta { flex: none; }
+
 .icon-del {
   width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid var(--border); border-radius: 6px; background: var(--surface);

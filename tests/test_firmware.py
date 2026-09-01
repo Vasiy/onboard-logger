@@ -1,7 +1,11 @@
-"""Firmware op forces both K-Line log streams off, then restores them."""
+"""Firmware op forces both K-Line log streams off, then restores them, and
+writes a verbose per-operation log that explains a failure afterwards."""
 
+import os
+import stat
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -160,6 +164,139 @@ def test_restore_respects_prior_state():
         w = FakeWorker(dec=True, raw=False)   # raw was off before
         _run_true(w, tmp)
         assert w._dec is True and w._raw is False  # exact prior intent restored
+
+
+# -- verbose per-operation log --------------------------------------------
+def _fake_util(tmp: Path, body: str, rc: int = 0) -> str:
+    """A stand-in for 5am_util: prints what we tell it, exits with ``rc``."""
+    p = tmp / "fake_util.sh"
+    p.write_text("#!/bin/sh\n" + body + f"\nexit {rc}\n")
+    p.chmod(p.stat().st_mode | stat.S_IEXEC)
+    return str(p)
+
+
+def _fake_dev(root: Path) -> str:
+    dev = root / "dev"
+    dev.mkdir(parents=True, exist_ok=True)
+    (dev / "kline").write_text("")
+    (dev / "ttyUSB0").write_text("")
+    return str(dev)
+
+
+def _run_util(tmp, body, rc=0, verbose=False, op="read", fw_size=0):
+    """Start a real (fake) subprocess through the manager and wait for it."""
+    tmp = Path(tmp)
+    logs = tmp / "logs"
+    dev = _fake_dev(tmp)
+    fm = FirmwareManager(
+        worker_getter=lambda: None, util_path=_fake_util(tmp, body, rc),
+        fw_dir=str(tmp), port=str(Path(dev) / "kline"), state=State(),
+        log_dir=str(logs), dev_root=dev, sys_root=str(tmp / "sys"), fw_size=fw_size,
+    )
+    if op == "write":
+        (tmp / "img.bin").write_bytes(b"\x5a" * 4096)
+        fm.start_write("img.bin", verbose=verbose)
+    else:
+        fm.start_read("out.bin", verbose=verbose)
+    fm._thread.join(timeout=20)
+    return fm, logs
+
+
+def test_verbose_log_records_the_whole_operation():
+    with tempfile.TemporaryDirectory() as tmp:
+        fm, logs = _run_util(
+            tmp, 'echo "[+] reading block 1"; printf "x" > "$2"; echo "[+] done"')
+        assert fm.status()["result"] == "ok"
+        files = list(logs.glob("fw-reading-*.log"))
+        assert len(files) == 1, files
+        text = files[0].read_text()
+        assert "FW start op=reading name=out.bin" in text
+        assert "FW cmd " in text and " -v" in text      # -v is always passed
+        assert "USB node=" in text                      # adapter facts from sysfs
+        assert "UTIL [+] reading block 1" in text
+        assert "FW exit rc=0" in text and "FW end result=ok" in text
+        assert fm.status()["log_file"] == files[0].name
+
+
+def test_failure_reason_is_in_the_file_and_the_ui():
+    with tempfile.TemporaryDirectory() as tmp:
+        fm, logs = _run_util(tmp, 'echo "chatter"; echo "ERROR: no reply from ECU"',
+                             rc=3, op="write")
+        assert fm.status()["result"] == "error"
+        text = next(iter(logs.glob("fw-writing-*.log"))).read_text()
+        assert "UTIL ERROR: no reply from ECU" in text
+        assert "FW exit rc=3" in text and "FW end result=error" in text
+        assert "FW image size=4096 sha256=" in text     # what was about to be flashed
+        # the failing line reaches the UI list even with the verbose box unticked
+        assert any("no reply from ECU" in ln for ln in fm.status()["log"])
+        assert not any(ln == "chatter" for ln in fm.status()["log"])
+
+
+def test_zero_exit_with_an_error_line_is_still_a_failure():
+    """5am_util exits 0 after "ERROR: ioctl: Bad file descriptor" (main.c:494),
+    which used to be reported as a successful read."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fm, logs = _run_util(
+            tmp, 'printf "\\033[31m[!] ERROR: \\033[0mioctl: Bad file descriptor\\n"',
+            rc=0)
+        assert fm.status()["result"] == "error"
+        assert "ioctl: Bad file descriptor" in fm.status()["progress"]
+        text = next(iter(logs.glob("fw-reading-*.log"))).read_text()
+        assert "\x1b[" not in text          # ANSI colour stripped before logging
+        assert "FW verdict " in text
+
+
+def test_short_read_is_a_failure():
+    with tempfile.TemporaryDirectory() as tmp:
+        body = 'printf "%s" "half" > "$2"; echo "[+] done"'   # $2 == the -o path
+        fm, _logs = _run_util(tmp, body, fw_size=327680)
+        assert fm.status()["result"] == "error"
+        assert "!= 327680" in fm.status()["progress"]
+
+
+def test_full_read_passes_the_size_check():
+    with tempfile.TemporaryDirectory() as tmp:
+        body = 'dd if=/dev/zero of="$2" bs=1024 count=4 2>/dev/null; echo "[+] done"'
+        fm, _logs = _run_util(tmp, body, fw_size=4096)
+        assert fm.status()["result"] == "ok", fm.status()["progress"]
+
+
+def test_missing_output_is_a_failure():
+    with tempfile.TemporaryDirectory() as tmp:
+        fm, _logs = _run_util(tmp, 'echo "[+] pretending"')
+        assert fm.status()["result"] == "error"
+        assert "не создан" in fm.status()["progress"]
+
+
+def test_verbose_box_streams_everything_to_the_ui():
+    with tempfile.TemporaryDirectory() as tmp:
+        fm, _logs = _run_util(tmp, 'echo "chatter"; printf "x" > "$2"', verbose=True)
+        assert any(ln == "chatter" for ln in fm.status()["log"])
+
+
+def test_port_state_tracks_the_node():
+    with tempfile.TemporaryDirectory() as tmp:
+        fm, _logs = _run_util(tmp, 'printf "x" > "$2"')
+        assert fm._port_state()[0] is True
+        Path(fm.port).unlink()
+        assert fm._port_state()[0] is False       # a vanished adapter is visible
+
+
+def test_operation_log_has_a_size_cap():
+    with tempfile.TemporaryDirectory() as tmp:
+        fm, logs = _run_util(tmp, 'printf "x" > "$2"')
+        fm._vlog = (logs / "cap.log").open("a", buffering=1)
+        fm._vlog_bytes = 0
+        try:
+            import app.web.firmware as fwmod
+            cap, fwmod.FW_LOG_MAX = fwmod.FW_LOG_MAX, 200
+            for i in range(200):
+                fm._v("UTIL", "x" * 50)
+        finally:
+            fwmod.FW_LOG_MAX = cap
+            fm._vclose()
+        assert (logs / "cap.log").stat().st_size < 1000
+        assert "truncated" in (logs / "cap.log").read_text()
 
 
 def _main():

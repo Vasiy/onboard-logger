@@ -15,7 +15,7 @@ SSH/deploy details. Read it before touching protocol code, and update it when ha
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
-# offline test suite — plain scripts, no pytest runner needed, no hardware/radio (130 tests)
+# offline test suite — plain scripts, no pytest runner needed, no hardware/radio (153 tests)
 # test_ui_*.py shell out to tests/ui_*.js (app.js in a Node vm); they skip without node
 for f in tests/*.py; do .venv/bin/python "$f"; done
 .venv/bin/python tests/test_kline.py          # a single file (prints "ok <name>" per test)
@@ -89,6 +89,17 @@ different namespaces (a Ducati answers `96520610B` live while its image holds a 
 model text is free-form, so one motorcycle appears as `1098`, `1098S` and `Superbike 1098 (USA)`, and
 letting that decide would block legitimate writes.
 
+**The board keeps its own diagnostics log.** `app/web/diag.py` writes `diag-<ts>.log` into
+`log_dir` alongside the ride logs: the worker's link events (`link_up`/`link_down` with the
+exception and how long the link had been up, `log_open`/`log_close` with the reason a file ended),
+a sysfs health snapshot every `diag.interval_s`, and a filtered tail of `/dev/kmsg`. The kernel
+half is the point: a ride's log splitting into several files turned out to be the USB hub dropping
+its port ("disabled by hub (EMI?)"), which killed the FTDI cable and the Wi-Fi dongle at once, and
+only the kernel ever says so — `journalctl -k` is empty on this board and that boot's journal never
+reached the SD card. It rotates at `diag.max_mb` (archive to `.zip`, keep `diag.keep`), is toggled
+from Config → System, and is read with `GET /api/diag.txt`. Every call from the worker is
+best-effort: diagnostics must never take the ride down.
+
 **Parameters are data, not code.** `config/params.json` defines each channel (`rli`, `fmt`, `offset`,
 `length`, `endian`, `signed`, `scale`, `bias`, `recip`, `digits`, `map`/`map_type`). Naming a newly
 discovered rli, changing a scale, or adding a status decoder is a JSON edit — no Python change.
@@ -100,6 +111,23 @@ live data is `21 <rli>` → `61 <rli> <value>`, value at **offset 2**, big-endia
 `10 81`, session **0x81**) is armed **lazily on the first Testing command**, never at connect — the
 logging path must stay byte-identical to what is verified on the bike. `testing.session_init: false`
 is the escape hatch.
+
+**A firmware read/write leaves a verbose file behind.** `FirmwareManager` always passes `-v` to
+`5am_util` (the checkbox now only decides whether the UI list shows every line or just milestones
+and anything failure-shaped) and writes `fw-<op>-<ts>.log` into `log_dir`: the command, the image
+size + sha256, the ECU identity, `usb_facts()` from sysfs (chip, serial, `2-1.1` hub port, driver,
+latency timer) before and after, every util line, the kernel's USB lines for the length of the
+operation via `KmsgReader` — started even when the diagnostics log is off — a 1 Hz port sampler
+that says out loud when `/dev/kline` disappears mid-transfer, and on failure a `dmesg` tail. Read
+Read it with `GET /api/firmware/log.txt?file=<name>`; the files are listed in **Config → System**
+(`GET /api/firmware/logs`) and deliberately excluded from the Logs tab — `_is_ride_log()` in
+`main.py` is the single place that decides what belongs there.
+
+**The exit code of `5am_util` does not decide the result.** With no adapter attached it prints
+`ERROR: ioctl: Bad file descriptor` (main.c:494) and still exits 0, so a failed read was reported
+as a success. `_verdict()` fails the operation when the util printed an error line (ANSI stripped
+first), when a read left no file, or when the file is not `firmware_size` bytes — and the reason,
+not "код возврата 0", is what the UI shows.
 
 **Firmware writes are size-gated.** `firmware_size` (327680 B) is checked before any write; an image
 of the wrong size bricks the ECU. Read/write shell out to the external `5am_util` binary at

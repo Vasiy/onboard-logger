@@ -52,6 +52,13 @@
     "raw_default": false,
     "zip_after": false
   },
+  "diag": {
+    "enabled": true,
+    "interval_s": 5,
+    "max_mb": 2,
+    "keep": 10,
+    "kmsg": true
+  },
   "locale": "en",
   "log_dir": "/root/k-line",
   "firmware_dir": "/root/firmware",

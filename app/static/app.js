@@ -41,7 +41,7 @@ $$(".tab").forEach((btn) => {
     $$(".tabpanel").forEach((p) => p.classList.toggle("is-active", p.id === "tab-" + name));
     fwLeave();
     if (name === "logs") loadLogs();
-    if (name === "config") { loadConfig(); loadTime(); }
+    if (name === "config") { loadConfig(); loadTime(); loadFwLogs(); }
     if (name === "firmware") fwEnter();
     if (name === "testing") testingEnter();
   });
@@ -1072,6 +1072,30 @@ $("#cfgForm").addEventListener("change", (e) => {
 // locale also switches the UI instantly; the change listener above persists it
 $("#localeSelect").addEventListener("change", (e) => applyLocale(e.target.value));
 
+// ---------- firmware operation logs (Config -> System) ----------
+// Deliberately not in the Logs tab: a flash log is a diagnostics artefact, and
+// mixing it into the ride logs made both lists harder to scan.
+async function loadFwLogs() {
+  const box = $("#fwLogsList");
+  if (!box) return;
+  let d;
+  try { d = await api("/api/firmware/logs"); } catch (e) { return; }
+  if (!d.files.length) {
+    box.innerHTML = `<p class="hint" data-i18n="cfg.fwLogsEmpty">${esc(t("cfg.fwLogsEmpty"))}</p>`;
+    return;
+  }
+  box.innerHTML = d.files.map((f) => {
+    const cur = f.name === d.current ? ' <span class="badge dec">now</span>' : "";
+    return `<div class="logrow">` +
+      `<a href="/api/firmware/log.txt?file=${encodeURIComponent(f.name)}" target="_blank" rel="noopener">${esc(f.name)}</a>${cur}` +
+      `<span class="lmeta">${fmtDate(f.mtime)} · ${fmtSize(f.size)}</span>` +
+      `<a class="mini" href="/api/logs/${encodeURIComponent(f.name)}" download>${esc(t("logs.download"))}</a>` +
+      `</div>`;
+  }).join("");
+}
+
+$("#fwLogsRefresh")?.addEventListener("click", loadFwLogs);
+
 // ---------- board clock ----------
 // No internet on the bike, so timesyncd may be running and still be wrong. The
 // browser is the only trustworthy clock around — offer to push it.
@@ -1212,7 +1236,9 @@ function renderLogs() {
     items.forEach((f) => {
       const row = document.createElement("div");
       row.className = "fwrow";
-      const badge = `<span class="badge ${f.kind === "raw" ? "raw" : "dec"}">${f.kind === "raw" ? "raw" : "dec"}</span>`;
+      // three kinds now: decoded CSV, raw frames, and the board diagnostics log
+      const bk = f.kind === "raw" ? "raw" : f.kind === "diag" ? "diag" : f.kind === "fw" ? "fw" : "dec";
+      const badge = `<span class="badge ${bk === "raw" ? "raw" : "dec"}">${bk}</span>`;
       const zip = f.zip ? '<span class="badge zip">zip</span>' : "";
       const date = fmtDate(f.mtime);
       row.innerHTML =

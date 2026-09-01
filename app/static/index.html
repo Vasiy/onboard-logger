@@ -469,6 +469,18 @@
           <label class="inline"><input name="system.fw_guard_override" type="checkbox" />
             <span data-i18n="cfg.fwOverride">Allow writing a firmware that does not match this ECU</span></label>
           <p class="hint" data-i18n="cfg.fwOverrideHint">Off by default. The check compares the calibration in the image with the one the ECU reports and blocks a write only when both are known and belong to different bikes. It cannot tell a good tune from a bad one — it only stops the wrong motorcycle's firmware.</p>
+          <label class="inline"><input name="diag.enabled" type="checkbox" />
+            <span data-i18n="cfg.diag">Board diagnostics log</span></label>
+          <label><span data-i18n="cfg.diagMax">Diagnostics file limit, MB</span>
+            <input name="diag.max_mb" type="number" min="0.05" max="64" step="0.5" /></label>
+          <div class="fw-logs">
+            <div class="card__head"><span data-i18n="cfg.fwLogs">Firmware operation logs</span>
+              <button type="button" id="fwLogsRefresh" class="mini" data-i18n="cfg.fwLogsRefresh">refresh</button>
+            </div>
+            <div id="fwLogsList" class="filelist"></div>
+            <p class="hint" data-i18n="cfg.fwLogsHint">One file per firmware read or write: the util's full output, the adapter's USB facts, the kernel's messages during the transfer and the reason it failed. Kept here rather than among the ride logs.</p>
+          </div>
+          <p class="hint" data-i18n="cfg.diagHint">Records USB, Wi-Fi and K-Line events next to the ride logs: what the kernel says about the adapter, when the link came up or died, and a board snapshot every few seconds. On reaching the limit the file is archived to .zip and a new one starts. Download it in Logs (diag-…) or open /api/diag.txt.</p>
           <p class="hint" data-i18n="cfg.autoTimeHint">The board has no battery-backed clock. With this on, the first browser that opens the UI after a power-up sets the date, time and timezone — once per power-up, and only if the two clocks differ by more than 2 s.</p>
           <div class="time-row">
             <div class="time-info">

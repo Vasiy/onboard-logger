@@ -167,6 +167,16 @@ class ConfigManager:
         if locale not in {"en", "de", "es", "fr", "it", "nl", "bg", "ru"}:
             raise ValueError(f"Неизвестная локаль: {locale}")
 
+        # the diagnostics log shares the SD card with the ride logs: a limit of
+        # 0 would rotate on every line, a huge one fills the card
+        mb = cfg.get("diag", {}).get("max_mb", 2)
+        try:
+            mb = float(mb)
+        except (TypeError, ValueError):
+            raise ValueError("Размер diag-файла: число в МБ")
+        if not (0.05 <= mb <= 64):
+            raise ValueError("Размер diag-файла: 0.05..64 МБ")
+
     # -- rendering ---------------------------------------------------------
     def render_hostapd(self, cfg: dict) -> str:
         wifi = dict(cfg["wifi"])

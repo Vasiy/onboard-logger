@@ -4,15 +4,34 @@ __pycache__/
 venv/
 *.egg-info/
 .pytest_cache/
-# runtime artifacts / captures
+# runtime artifacts / captures — nothing a board produced may reach GitHub
 *.ndjson
+*.log
+*.log.zip
 /root-k-line/
 config/config.json
-*.log
 .DS_Store
 config/selected.json
 old_logs/
 config/fw_catalog.user.json
+
+# ride, diagnostics and firmware-operation logs, wherever they are copied to
+kline-*.csv
+kline-*.raw.log*
+scan-*.csv
+scan-*.ndjson*
+diag-*.log*
+fw-*.log*
+k-line/
+logs/
+
+# ECU firmware images and their sidecars: private property, ~320 KB each
+*.bin
+*.bin.txt
+*.hex
+*.s19
+firmware/
+/root-firmware/
 
 # personal context dump for new chat sessions, not part of the project
 CONTEXT.md
@@ -22,3 +41,6 @@ CONTEXT.md
 
 # decompiles of third-party tools — reference material, kept outside the repo
 *.exe.txt
+
+# nested worktrees Claude Code creates here — a checkout inside a checkout
+.claude/worktrees/
