@@ -10,6 +10,18 @@ SSH/deploy details. Read it before touching protocol code, and update it when ha
 `docs/PROTOCOL.md` is the stable protocol reference; `docs/REVERSE.md` records what the PC tools
 (GuzziDiag / IAWDiag / JPDiag) gave us and what could not be recovered.
 
+## Two repositories
+
+`Vasiy/onboard-logger` (public) is the reference: a feature lands there as one commit on `main`, no
+branches. `Vasiy/onboard-logger-archive` (private) is this checkout's `origin` and keeps the working
+history. They diverged on 2026-08-30, when the public line was rebuilt to purge the board's address
+and root password, the local paths and the third-party decompiles — so the two histories share no
+ancestor and **must never be pushed into each other**. Sync by content, not by history: clone the
+public repo, `git archive HEAD | tar -x -C <clone>`, commit there, push. The pre-push scan
+(`~/.claude/CLAUDE.md`) is the gate; it filters two shapes — `path:line:text` for the working tree
+and the raw `+added line` for outgoing commits — so a `.secretscan-allow` entry has to match the
+shape it is meant to quiet.
+
 ## Commands
 
 ```bash
