@@ -20,11 +20,13 @@ import shutil
 import subprocess
 import threading
 import time
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
 from ..kline.ecu_id import DEFAULT_FIELDS, describe
 from .diag import KmsgReader, usb_facts
+from .storage import day_name, resolve_root
 
 # A flash that fails leaves nothing behind except what we wrote down, so the
 # per-operation log keeps everything: the util's own -v output, the kernel's USB
@@ -62,9 +64,10 @@ class FirmwareManager:
         # Both are injected so this module stays free of config/catalog plumbing.
         self.guard = guard
         self.describe_image = describe_image
-        # verbose per-operation log: same directory as the ride logs, so it is
-        # listed and downloadable next to them
-        self.log_dir = Path(log_dir) if log_dir else Path(fw_dir)
+        # verbose per-operation log: the same day folder as the ride logs, so it
+        # is listed and downloadable next to them. Asked again per operation,
+        # because the destination may be a USB stick that came and went.
+        self._log_root = log_dir or fw_dir
         self.diag = diag
         self.sys_root, self.dev_root = sys_root, dev_root
         self.fw_size = int(fw_size or 0)   # expected image size, 0 = unknown
@@ -161,11 +164,16 @@ class FirmwareManager:
     # -- verbose per-operation log ----------------------------------------
     UI_KEEP = ("[", "err", "fail", "timeout", "invalid", "abort", "%")
 
+    @property
+    def log_dir(self) -> Path:
+        return resolve_root(self._log_root)
+
     def _vopen(self, op: str, name: str) -> None:
         try:
-            self.log_dir.mkdir(parents=True, exist_ok=True)
+            d = self.log_dir / day_name()
+            d.mkdir(parents=True, exist_ok=True)
             ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-            self._vlog_path = self.log_dir / f"fw-{op}-{ts}.log"
+            self._vlog_path = d / f"fw-{op}-{ts}.log"
             self._vlog = self._vlog_path.open("a", buffering=1)
             self._vlog_bytes = 0
         except OSError:
@@ -195,6 +203,25 @@ class FirmwareManager:
             fh.flush()
             os.fsync(fh.fileno())     # a failed flash is often followed by a reboot
             fh.close()
+        except OSError:
+            pass
+        # one switch in Config -> System archives both board log kinds
+        if self.diag is not None and getattr(self.diag, "zip_after", False):
+            self._varchive(self._vlog_path)
+
+    def _varchive(self, path: Path | None) -> None:
+        """Zip a finished operation log. Best-effort: an unarchived file is a
+        cosmetic problem, an exception here would be a lost flash result."""
+        if path is None:
+            return
+        try:
+            if not path.is_file() or path.stat().st_size == 0:
+                return
+            zpath = path.with_name(path.name + ".zip")
+            with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
+                z.write(path, arcname=path.name)
+            path.unlink()
+            self._vlog_path = zpath      # name the file that now exists
         except OSError:
             pass
 

@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.kline.logger import KLineWorker  # noqa: E402
 from app.web.led import Led  # noqa: E402
+from app.web.storage import day_name  # noqa: E402
 from app.web.state import State  # noqa: E402
 
 PARAMS = str(Path(__file__).resolve().parent.parent / "config" / "params.json")
@@ -46,6 +47,8 @@ def test_decoded_csv():
         assert w.state.log_decoded_file == ""          # writing stopped after close
         assert w.state.logging_decoded is True         # armed (default on) persists
         assert path.name.startswith("kline-dec-") and path.suffix == ".csv"
+        assert path.parent.name == day_name(), "logs are grouped by the day they were written"
+        assert path.parent.parent == Path(tmp)
 
 
 def test_raw_ndjson():
@@ -58,6 +61,7 @@ def test_raw_ndjson():
         rec = json.loads(Path(path).read_text().splitlines()[0])
         assert rec["dir"] == "tx" and rec["hex"] == "810f"
         assert path.name.startswith("kline-") and path.name.endswith(".raw.log")
+        assert path.parent.name == day_name()
 
 
 def test_decoded_columns_follow_selection():
@@ -109,6 +113,117 @@ def test_reconcile_independent():
         w._reconcile_logging()
         assert w._dec_fh is None and w._raw_fh is not None
         w._close_all_logs()
+
+
+def test_root_may_be_a_callable_and_is_followed_live():
+    """A stick pulled mid-ride moves the root; the open file must follow it."""
+    with tempfile.TemporaryDirectory() as usb, tempfile.TemporaryDirectory() as sd:
+        where = [usb]
+        w = KLineWorker(port="/dev/null", params_path=PARAMS,
+                        log_dir=lambda: where[0], state=State(), led=Led())
+        w._open_dec()
+        assert w._dec_path.parent.parent == Path(usb)
+        where[0] = sd                       # the stick is gone; fall back to the card
+        w._root_check_at = 0.0
+        w._reconcile_logging()
+        assert w._dec_path.parent.parent == Path(sd), "the file followed the root"
+        assert w._dec_fh is not None, "and logging never stopped"
+        w._close_all_logs()
+
+
+def test_a_dead_disk_costs_the_file_not_the_link():
+    with tempfile.TemporaryDirectory() as tmp:
+        w = _worker(tmp)
+        w._open_dec()
+
+        class Dead:
+            def write(self, _s):
+                raise OSError(5, "Input/output error")
+
+        w._dec_fh = Dead()
+        w._write_decoded({"rpm": 1000})     # must not raise into the poll loop
+        assert w._dec_fh is None and w.state.log_decoded_file == ""
+
+
+def test_diagnostics_run_only_while_a_log_is_open():
+    with tempfile.TemporaryDirectory() as tmp:
+        calls = []
+
+        class FakeDiag:
+            def start(self):
+                calls.append("start")
+
+            def stop(self):
+                calls.append("stop")
+
+            def event(self, kind, **f):
+                pass
+
+        w = KLineWorker(port="/dev/null", params_path=PARAMS, log_dir=tmp,
+                        state=State(), led=Led(), diag=FakeDiag())
+        w._reconcile_logging()              # decoded is armed by default -> opens
+        assert calls[-1] == "start", calls
+        w.set_logging_decoded(False)
+        w._reconcile_logging()
+        assert calls[-1] == "stop", calls
+
+
+def test_link_events_are_silent_while_nothing_is_recorded():
+    """A bike parked with the ignition off must not produce a diagnostics file.
+
+    The worker retries the link forever; each failure used to write an event,
+    and an event opens the file on demand — so an idle board wrote logs about
+    having nothing to log.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        seen = []
+
+        class FakeDiag:
+            def start(self):
+                seen.append("start")
+
+            def stop(self):
+                seen.append("stop")
+
+            def event(self, kind, **f):
+                seen.append(kind)
+
+        w = KLineWorker(port="/dev/null", params_path=PARAMS, log_dir=tmp,
+                        state=State(), led=Led(), diag=FakeDiag())
+        w._diag("link_fail", err="SerialException")
+        assert seen == [], f"idle worker wrote {seen}"
+
+        # once a ride log is open the same call goes through
+        w._reconcile_logging()
+        assert "start" in seen
+        seen.clear()
+        w._diag("link_fail", err="SerialException")
+        assert seen == ["link_fail"], seen
+
+
+def test_link_up_opens_the_diagnostics_file_it_belongs_to():
+    """link_up happens before the first file exists; it must not be lost."""
+    with tempfile.TemporaryDirectory() as tmp:
+        seen = []
+
+        class FakeDiag:
+            def start(self):
+                seen.append("start")
+
+            def stop(self):
+                seen.append("stop")
+
+            def event(self, kind, **f):
+                seen.append((kind, f.get("baud")))
+
+        w = KLineWorker(port="/dev/null", params_path=PARAMS, log_dir=tmp,
+                        state=State(), led=Led(), diag=FakeDiag())
+        w._link_ctx = {"baud": 10400, "init": "fast", "ecu": "IAW5AM"}
+        w._reconcile_logging()
+        assert seen[0] == "start" and seen[1] == ("link_up", 10400), seen
+        w._close_all_logs()
+        assert "stop" in [x for x in seen if isinstance(x, str)]
+        assert w._link_ctx == {}, "the context belongs to the link that just ended"
 
 
 def _main():

@@ -177,6 +177,15 @@ class ConfigManager:
         if not (0.05 <= mb <= 64):
             raise ValueError("Размер diag-файла: 0.05..64 МБ")
 
+        # the log destination is picked through /api/storage (which has to mount
+        # something); this only stops a hand-edited config.json from arriving
+        st = cfg.get("storage", {})
+        if st.get("dest", "internal") not in ("internal", "usb"):
+            raise ValueError("Место записи: internal или usb")
+        mp = str(st.get("mount_point", "/media/usb0"))
+        if not mp.startswith("/") or ".." in mp:
+            raise ValueError("Точка монтирования: абсолютный путь")
+
     # -- rendering ---------------------------------------------------------
     def render_hostapd(self, cfg: dict) -> str:
         wifi = dict(cfg["wifi"])

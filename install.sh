@@ -19,9 +19,14 @@ log() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 log "apt: installing packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
-# wpasupplicant + dhcpcd-base are the client-mode half of the Wi-Fi switch
+# wpasupplicant + dhcpcd-base are the client-mode half of the Wi-Fi switch.
+# Formatting a USB stick needs three more packages: exfatprogs and dosfstools
+# for mkfs.exfat / mkfs.vfat, and `fdisk` for sfdisk — Ubuntu splits sfdisk out
+# of util-linux, so wipefs being present says nothing about it, and a run that
+# wipes before discovering that leaves a stick with no partition table at all.
 apt-get install -y hostapd dnsmasq wpasupplicant dhcpcd-base \
   python3-venv python3-pip usbutils rfkill iw rsync \
+  exfatprogs dosfstools fdisk \
   build-essential git
 
 log "copying app -> ${DEST}"
@@ -50,7 +55,7 @@ mkdir -p "$DEST/bin"
 cp "$SRC5AM/5am_util" "$DEST/bin/5am_util"
 
 log "runtime config -> ${ETC} (preserving existing)"
-mkdir -p "$ETC" /root/k-line /root/firmware
+mkdir -p "$ETC" /root/k-line /root/firmware /media
 [ -f "$ETC/config.json" ] || cp "$DEST/config/config.default.json" "$ETC/config.json"
 [ -f "$ETC/params.json" ] || cp "$DEST/config/params.json" "$ETC/params.json"
 [ -f "$ETC/ecu_id.json" ] || cp "$DEST/config/ecu_id.json" "$ETC/ecu_id.json"

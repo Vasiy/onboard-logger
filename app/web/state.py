@@ -31,6 +31,10 @@ class State:
         self.logging_raw = False
         self.log_raw_file = ""
         self.log_raw_records = 0
+        # where logs are going right now, and why it is not where you asked
+        self.storage_dest = "internal"
+        self.storage_root = ""
+        self.storage_fallback = ""
         self.selected: list[str] = []  # channel keys the UI shows live
         self.catalog: list[dict] = []  # [{key,name,unit}, ...]
         # rli-scan (bus sweep) status
@@ -136,6 +140,12 @@ class State:
             self.log_raw_file = log_file
             self.log_raw_records = records
 
+    def set_storage(self, dest: str, root: str, fallback: str = "") -> None:
+        with self._lock:
+            self.storage_dest = dest
+            self.storage_root = root
+            self.storage_fallback = fallback
+
     def inc_raw_records(self, n: int = 1) -> None:
         with self._lock:
             self.log_raw_records += n
@@ -193,6 +203,9 @@ class State:
                 "log_decoded_file": self.log_decoded_file,
                 "log_decoded_records": self.log_decoded_records,
                 "logging_raw": self.logging_raw,
+                "storage_dest": self.storage_dest,
+                "storage_root": self.storage_root,
+                "storage_fallback": self.storage_fallback,
                 "log_raw_file": self.log_raw_file,
                 "log_raw_records": self.log_raw_records,
                 "selected": list(self.selected),

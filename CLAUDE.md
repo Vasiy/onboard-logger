@@ -27,8 +27,9 @@ shape it is meant to quiet.
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
-# offline test suite — plain scripts, no pytest runner needed, no hardware/radio (153 tests)
-# test_ui_*.py shell out to tests/ui_*.js (app.js in a Node vm); they skip without node
+# offline test suite — plain scripts, no pytest runner needed, no hardware/radio (182 Python checks + 36 in the three Node UI suites)
+# test_ui_*.py shell out to tests/ui_*.js (app.js in a Node vm on tests/ui_sandbox.js);
+# they skip without node
 for f in tests/*.py; do .venv/bin/python "$f"; done
 .venv/bin/python tests/test_kline.py          # a single file (prints "ok <name>" per test)
 
@@ -37,7 +38,7 @@ node -e "new Function(require('fs').readFileSync('app/static/app.js','utf8'))"  
 .venv/bin/uvicorn app.main:app --reload --port 8000                          # local UI, no AP/K-Line
 ```
 
-i18n parity is a hard invariant — all 8 locales must have identical key sets (currently 324 keys ×8):
+i18n parity is a hard invariant — all 8 locales must have identical key sets (362 keys ×8):
 
 ```bash
 node -e "const fs=require('fs');global.window={};eval(fs.readFileSync('app/static/i18n.js','utf8'));
@@ -101,6 +102,21 @@ different namespaces (a Ducati answers `96520610B` live while its image holds a 
 model text is free-form, so one motorcycle appears as `1098`, `1098S` and `Superbike 1098 (USA)`, and
 letting that decide would block legitimate writes.
 
+**Logs go where the rider says, in a folder per day.** `app/web/storage.py` is the single
+authority on "where do I write right now", and it hands the answer out as a *callable*:
+`KLineWorker` and `DiagLog` both take `storage.active_root` instead of a path, so plugging,
+pulling or picking a stick takes effect at the next file open rather than at the next service
+restart (before this, the writers read `log_dir` once at startup while `/api/logs` re-read it per
+request — they could disagree indefinitely). Files land in `<root>/DD-MM-YYYY/`; that name does not
+sort as text, so every consumer orders days through `parse_day()` / `dayKey()`. Files written
+before this layout stay loose in the root and are still listed. The SD card is the fallback
+always: if the chosen stick is absent when a log opens, or is yanked mid-ride, `_reconcile_storage`
+closes the file with `storage_changed` and reopens it on internal memory — a ride is never lost to
+a connector. Formatting (`/api/storage/format`, exFAT by default) wipes a whole device, so every
+guard lives in `StorageManager.format()`: the device must be removable USB, must carry no system
+mountpoint, and must be present in a freshly built `devices()` list — a client-supplied `/dev/...`
+string is never acted on directly.
+
 **The board keeps its own diagnostics log.** `app/web/diag.py` writes `diag-<ts>.log` into
 `log_dir` alongside the ride logs: the worker's link events (`link_up`/`link_down` with the
 exception and how long the link had been up, `log_open`/`log_close` with the reason a file ended),
@@ -108,9 +124,35 @@ a sysfs health snapshot every `diag.interval_s`, and a filtered tail of `/dev/km
 half is the point: a ride's log splitting into several files turned out to be the USB hub dropping
 its port ("disabled by hub (EMI?)"), which killed the FTDI cable and the Wi-Fi dongle at once, and
 only the kernel ever says so — `journalctl -k` is empty on this board and that boot's journal never
-reached the SD card. It rotates at `diag.max_mb` (archive to `.zip`, keep `diag.keep`), is toggled
-from Config → System, and is read with `GET /api/diag.txt`. Every call from the worker is
-best-effort: diagnostics must never take the ride down.
+reached the SD card. It rotates at `diag.max_mb` (archive to `.zip`, keep `diag.keep` — pruned with
+`rglob`, since the archives sit in per-day folders), is toggled from Config → System, and is read
+with `GET /api/diag.txt` (add `?file=<day>/<name>` for a closed one). It runs **only while a ride
+log is open**: `_reconcile_diag()` in the worker starts it with the first file and stops it with the
+last, so it costs SD-card life only when there is something to explain. The trade is deliberate — a
+stick plugged in on the driveway, with no recording running, leaves no trace in the log. The files
+are listed in **Config → System** (`GET /api/logs?kind=board`), next to the firmware operation logs;
+the Logs tab asks for `kind=ride`. `diag.zip_after` archives a finished board log — both kinds, the
+firmware ones included. Every call from the worker is best-effort: diagnostics must never take the
+ride down.
+
+**Formatting checks it can finish before it destroys anything.** `wipefs` alone erases the partition
+table, so `StorageManager.format()` verifies `wipefs`, `sfdisk` *and* the `mkfs` for the chosen
+filesystem up front — Ubuntu ships `sfdisk` in `fdisk`, not in `util-linux`, and a board that had
+`wipefs` but not `sfdisk` left a stick with no partition table at all on 2026-08-31 (`install.sh`
+now installs `fdisk`). After `mkfs` it waits through `partprobe`/`udevadm settle` until the kernel
+can name the new filesystem, or the very response that reports success still describes the stick as
+empty. exFAT is mounted **without** `flush`: the driver rejects the whole mount over it
+("exfat: Unknown parameter 'flush'"), so that option is vfat-only. Errors carry a `detail` the UI
+appends to its toast — a phone-only UI cannot fall back to ssh to find out what failed.
+
+**One log browser, two instances.** `makeLogBrowser()` in `app.js` is the whole of both lists: day
+groups (newest open, the rest folded), a kind filter, sortable columns, multi-select download —
+a fully-selected day is bundled under its own name, a lone file is served straight — and delete.
+The Logs tab and the Config → System panel differ only in the slice they ask for, the badge they
+paint and which config key their auto-archive checkbox writes. Adding a third list means one more
+call to the factory, not one more renderer; `tests/ui_board_logs.js` drives both through their own
+handlers to keep them from drifting apart again — on `tests/ui_sandbox.js`, the DOM stub all three
+harnesses share.
 
 **Parameters are data, not code.** `config/params.json` defines each channel (`rli`, `fmt`, `offset`,
 `length`, `endian`, `signed`, `scale`, `bias`, `recip`, `digits`, `map`/`map_type`). Naming a newly
@@ -130,10 +172,11 @@ and anything failure-shaped) and writes `fw-<op>-<ts>.log` into `log_dir`: the c
 size + sha256, the ECU identity, `usb_facts()` from sysfs (chip, serial, `2-1.1` hub port, driver,
 latency timer) before and after, every util line, the kernel's USB lines for the length of the
 operation via `KmsgReader` — started even when the diagnostics log is off — a 1 Hz port sampler
-that says out loud when `/dev/kline` disappears mid-transfer, and on failure a `dmesg` tail. Read
-Read it with `GET /api/firmware/log.txt?file=<name>`; the files are listed in **Config → System**
-(`GET /api/firmware/logs`) and deliberately excluded from the Logs tab — `_is_ride_log()` in
-`main.py` is the single place that decides what belongs there.
+that says out loud when `/dev/kline` disappears mid-transfer, and on failure a `dmesg` tail.
+Read it with `GET /api/firmware/log.txt?file=<day>/<name>`; the files land in the ride's day folder
+and are listed in **Config → System**, never in the Logs tab — `_log_kind()` in `main.py` is the
+single place that decides what a file is, and `KIND_GROUPS` maps the four kinds onto the two lists
+(`ride` = decoded + raw, `board` = diag + fw).
 
 **The exit code of `5am_util` does not decide the result.** With no adapter attached it prints
 `ERROR: ioctl: Bad file descriptor` (main.c:494) and still exits 0, so a failed read was reported

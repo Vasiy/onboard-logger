@@ -41,7 +41,7 @@ $$(".tab").forEach((btn) => {
     $$(".tabpanel").forEach((p) => p.classList.toggle("is-active", p.id === "tab-" + name));
     fwLeave();
     if (name === "logs") loadLogs();
-    if (name === "config") { loadConfig(); loadTime(); loadFwLogs(); }
+    if (name === "config") { loadConfig(); loadTime(); loadStorage(); boardLogs.load(); }
     if (name === "firmware") fwEnter();
     if (name === "testing") testingEnter();
   });
@@ -51,9 +51,15 @@ $$(".tab").forEach((btn) => {
 async function api(path, opts) {
   const r = await fetch(path, opts);
   if (!r.ok) {
-    let msg = r.statusText;
-    try { msg = (await r.json()).error || msg; } catch (e) {}
-    throw new Error(msg);
+    let msg = r.statusText, detail = "";
+    try {
+      const body = await r.json();
+      msg = body.error || msg;
+      detail = body.detail || "";
+    } catch (e) {}
+    const err = new Error(msg);
+    err.detail = detail;      // what the board actually said, e.g. "нет sfdisk"
+    throw err;
   }
   return r.status === 204 ? null : r.json();
 }
@@ -79,7 +85,15 @@ function toast(msg, kind = "err", ms = 5000) {
   setTimeout(() => el.remove(), ms);
   return el;
 }
-const toastErr = (err) => toast(t("banner.error") + " " + (err && err.message ? err.message : err), "err");
+const toastErr = (err) => {
+  const m = err && err.message ? err.message : String(err);
+  // the backend answers with i18n keys ("err.storage_busy"); t() falls back to
+  // the key itself, so an untranslated one still says something. The detail is
+  // the board's own words — without it "formatting failed" needed an ssh session
+  // to explain, which is exactly what a phone-only UI cannot do.
+  const d = err && err.detail ? " (" + err.detail + ")" : "";
+  toast(t("banner.error") + " " + t(m) + d, "err");
+};
 
 // Resolves true/false. okLabel carries the verb of the action ("Write to ECU"),
 // so the button says what it does instead of "OK".
@@ -428,6 +442,8 @@ function applySnapshot(s) {
   if (document.activeElement !== rT) rT.checked = s.logging_raw;
   $("#decMeta").textContent = logMeta(s.logging_decoded, s.log_decoded_file, s.log_decoded_records);
   $("#rawMeta").textContent = logMeta(s.logging_raw, s.log_raw_file, s.log_raw_records);
+
+  if (s.storage_root !== undefined) setLogsDest(s.storage_dest, s.storage_fallback, s.storage_root);
 
   const scanT = $("#scanToggle");
   if (scanT) {
@@ -1072,30 +1088,6 @@ $("#cfgForm").addEventListener("change", (e) => {
 // locale also switches the UI instantly; the change listener above persists it
 $("#localeSelect").addEventListener("change", (e) => applyLocale(e.target.value));
 
-// ---------- firmware operation logs (Config -> System) ----------
-// Deliberately not in the Logs tab: a flash log is a diagnostics artefact, and
-// mixing it into the ride logs made both lists harder to scan.
-async function loadFwLogs() {
-  const box = $("#fwLogsList");
-  if (!box) return;
-  let d;
-  try { d = await api("/api/firmware/logs"); } catch (e) { return; }
-  if (!d.files.length) {
-    box.innerHTML = `<p class="hint" data-i18n="cfg.fwLogsEmpty">${esc(t("cfg.fwLogsEmpty"))}</p>`;
-    return;
-  }
-  box.innerHTML = d.files.map((f) => {
-    const cur = f.name === d.current ? ' <span class="badge dec">now</span>' : "";
-    return `<div class="logrow">` +
-      `<a href="/api/firmware/log.txt?file=${encodeURIComponent(f.name)}" target="_blank" rel="noopener">${esc(f.name)}</a>${cur}` +
-      `<span class="lmeta">${fmtDate(f.mtime)} · ${fmtSize(f.size)}</span>` +
-      `<a class="mini" href="/api/logs/${encodeURIComponent(f.name)}" download>${esc(t("logs.download"))}</a>` +
-      `</div>`;
-  }).join("");
-}
-
-$("#fwLogsRefresh")?.addEventListener("click", loadFwLogs);
-
 // ---------- board clock ----------
 // No internet on the bike, so timesyncd may be running and still be wrong. The
 // browser is the only trustworthy clock around — offer to push it.
@@ -1150,199 +1142,370 @@ $("#btnShutdown").addEventListener("click", async () => {
   catch (e) { toastErr(e); }
 });
 
-// ---------- logs ----------
-let logsData = [];
-let logFilter = "all";
-let logSortKey = "mtime";
-let logSortDir = -1;
+// ---------- log browser ----------
+// The Logs tab and Config -> System show the same thing over different slices of
+// /api/logs: day groups, a kind filter, sortable columns, multi-select download
+// and delete. It is written once here and instantiated twice at the bottom; `o`
+// names the DOM a browser owns and the slice it lists.
 
-async function loadLogs() {
-  let data;
-  try { data = await api("/api/logs"); } catch (e) { return; }
-  logsData = data.files || [];
-  try { $("#logZip").checked = !!(await api("/api/config")).logging.zip_after; } catch (e) {}
-  setDiskFree($("#logsFree"), data);
-  logSortArrows();
-  renderLogs();
-}
-
-// day key YYYY-MM-DD from mtime, falling back to the YYYYMMDD in the filename
+// DD-MM-YYYY: the folder the board wrote the file into. Files recorded before
+// the per-day layout have no folder, so their day is still derived from mtime.
 function logDay(f) {
+  if (f.day) return f.day;
   if (f.mtime) {
     const d = new Date(f.mtime * 1000);
     if (d.getFullYear() > 1970) {
       const p = (n) => String(n).padStart(2, "0");
-      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+      return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()}`;
     }
   }
   const m = String(f.name).match(/(\d{4})(\d{2})(\d{2})/);
-  return m ? `${m[1]}-${m[2]}-${m[3]}` : "—";
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : "—";
 }
-function logsVisible() {
-  return logFilter === "all" ? logsData : logsData.filter((f) => f.kind === logFilter);
+// DD-MM-YYYY does not sort as text — 01-09 would come before 31-08. Every place
+// that orders or names days goes through this.
+function dayKey(day) {
+  const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(day || "");
+  return m ? m[3] + m[2] + m[1] : "00000000";
 }
-function updateDayChecks() {
-  $$("#logsList .logday").forEach((chk) => {
-    const wrap = chk.closest(".log-group").nextElementSibling;
-    const boxes = [...wrap.querySelectorAll(".logsel")];
-    const on = boxes.filter((b) => b.checked).length;
-    chk.checked = on > 0 && on === boxes.length;
-    chk.indeterminate = on > 0 && on < boxes.length;
-  });
-}
+// a log name may carry its day folder; the slash has to survive as a slash
+const logUrl = (name) => "/api/logs/" + String(name).split("/").map(encodeURIComponent).join("/");
 
-function renderLogs() {
-  const list = $("#logsList");
-  const checked = new Set([...list.querySelectorAll(".logsel:checked")].map((c) => c.value));
-  let rows = logsVisible();
-  const k = logSortKey, dir = logSortDir;
-  rows = rows.slice().sort((a, b) => {
-    let x = a[k], y = b[k];
-    if (k === "name") { x = String(x).toLowerCase(); y = String(y).toLowerCase(); }
-    return x < y ? -dir : x > y ? dir : 0;
-  });
-  list.innerHTML = "";
-  if (!rows.length) { list.innerHTML = `<p class="hint">${t("logs.empty")}</p>`; return; }
+function makeLogBrowser(o) {
+  const S = { rows: [], filter: "all", key: "mtime", dir: -1 };
+  const list = () => $(o.list);
+  const visible = () => (S.filter === "all" ? S.rows : S.rows.filter((f) => f.kind === S.filter));
+  const checked = () => [...document.querySelectorAll(`${o.list} .logsel:checked`)].map((c) => c.value);
 
-  const groups = new Map();                         // day -> rows (sorted order kept)
-  rows.forEach((f) => { const d = logDay(f); (groups.get(d) || groups.set(d, []).get(d)).push(f); });
-  const days = [...groups.keys()].sort().reverse(); // latest day first
+  async function load() {
+    let data;
+    try { data = await api(o.url); } catch (e) { return; }
+    S.rows = data.files || [];
+    if (o.zip) {
+      try { $(o.zip.sel).checked = !!o.zip.get(await api("/api/config")); } catch (e) {}
+    }
+    if (o.onData) o.onData(data);
+    sortArrows();
+    render();
+  }
 
-  days.forEach((day, gi) => {
-    const items = groups.get(day);
-    const anyChecked = items.some((f) => checked.has(f.name));
-    const total = items.reduce((s, f) => s + (f.size || 0), 0);
-
-    const hdr = document.createElement("div");
-    hdr.className = "log-group";
-    const wrap = document.createElement("div");
-    wrap.className = "log-group-wrap";
-    wrap.hidden = gi !== 0 && !anyChecked;          // latest open; others only if a row is checked
-
-    const dayChk = document.createElement("input");
-    dayChk.type = "checkbox"; dayChk.className = "logday"; dayChk.dataset.date = day;
-    dayChk.addEventListener("change", () => {
-      wrap.querySelectorAll(".logsel").forEach((c) => (c.checked = dayChk.checked));
-      updateDayChecks();
+  function updateDayChecks() {
+    $$(`${o.list} .logday`).forEach((chk) => {
+      const wrap = chk.closest(".log-group").nextElementSibling;
+      const boxes = [...wrap.querySelectorAll(".logsel")];
+      const on = boxes.filter((b) => b.checked).length;
+      chk.checked = on > 0 && on === boxes.length;
+      chk.indeterminate = on > 0 && on < boxes.length;
     });
-    const btn = document.createElement("button");
-    btn.type = "button"; btn.className = "log-group-btn";
-    const relabel = () =>
-      (btn.textContent = `${wrap.hidden ? "▸" : "▾"} ${day} · ${items.length} ${t("logs.groupCount")} · ${fmtSize(total)}`);
-    btn.addEventListener("click", () => { wrap.hidden = !wrap.hidden; relabel(); });
-    relabel();
-    hdr.appendChild(dayChk); hdr.appendChild(btn);
+  }
 
-    items.forEach((f) => {
-      const row = document.createElement("div");
-      row.className = "fwrow";
-      // three kinds now: decoded CSV, raw frames, and the board diagnostics log
-      const bk = f.kind === "raw" ? "raw" : f.kind === "diag" ? "diag" : f.kind === "fw" ? "fw" : "dec";
-      const badge = `<span class="badge ${bk === "raw" ? "raw" : "dec"}">${bk}</span>`;
-      const zip = f.zip ? '<span class="badge zip">zip</span>' : "";
-      const date = fmtDate(f.mtime);
-      row.innerHTML =
-        `<input type="checkbox" class="logsel" value="${esc(f.name)}"${checked.has(f.name) ? " checked" : ""} />` +
-        `<span class="fw-file__name" title="${esc(f.name)}">${badge}${zip}${esc(f.name)}</span>` +
-        `<span class="col-date">${date || ""}</span>` +
-        `<span class="col-size">${fmtSize(f.size)}</span>`;
-      $("input", row).addEventListener("change", updateDayChecks);
-      wrap.appendChild(row);
+  function render() {
+    const box = list();
+    if (!box) return;
+    const keep = new Set([...box.querySelectorAll(".logsel:checked")].map((c) => c.value));
+    const k = S.key, dir = S.dir;
+    const rows = visible().slice().sort((a, b) => {
+      let x = a[k], y = b[k];
+      if (k === "name") { x = String(x).toLowerCase(); y = String(y).toLowerCase(); }
+      return x < y ? -dir : x > y ? dir : 0;
     });
-    list.appendChild(hdr); list.appendChild(wrap);
+    box.innerHTML = "";
+    if (!rows.length) { box.innerHTML = `<p class="hint">${esc(t(o.emptyKey || "logs.empty"))}</p>`; return; }
+
+    const groups = new Map();                       // day -> rows (sorted order kept)
+    rows.forEach((f) => { const d = logDay(f); (groups.get(d) || groups.set(d, []).get(d)).push(f); });
+    const days = [...groups.keys()].sort((a, b) => (dayKey(a) < dayKey(b) ? -1 : 1)).reverse();
+
+    days.forEach((day, gi) => {
+      const items = groups.get(day);
+      const anyChecked = items.some((f) => keep.has(f.name));
+      const total = items.reduce((s, f) => s + (f.size || 0), 0);
+
+      const hdr = document.createElement("div");
+      hdr.className = "log-group";
+      const wrap = document.createElement("div");
+      wrap.className = "log-group-wrap";
+      wrap.hidden = gi !== 0 && !anyChecked;        // latest open; others only if a row is checked
+
+      const dayChk = document.createElement("input");
+      dayChk.type = "checkbox"; dayChk.className = "logday"; dayChk.dataset.date = day;
+      dayChk.addEventListener("change", () => {
+        wrap.querySelectorAll(".logsel").forEach((c) => (c.checked = dayChk.checked));
+        updateDayChecks();
+      });
+      const btn = document.createElement("button");
+      btn.type = "button"; btn.className = "log-group-btn";
+      const relabel = () =>
+        (btn.textContent = `${wrap.hidden ? "▸" : "▾"} ${day} · ${items.length} ${t("logs.groupCount")} · ${fmtSize(total)}`);
+      btn.addEventListener("click", () => { wrap.hidden = !wrap.hidden; relabel(); });
+      relabel();
+      hdr.appendChild(dayChk); hdr.appendChild(btn);
+
+      items.forEach((f) => {
+        const row = document.createElement("div");
+        row.className = "fwrow";
+        const bk = o.badge(f);
+        const zip = f.zip ? '<span class="badge zip">zip</span>' : "";
+        // an archived .zip is bytes, not a page — only the download link makes sense
+        const view = f.zip ? "" : (o.view ? o.view(f) : "");
+        const label = esc(f.file || f.name);
+        const name = view
+          ? `<a href="${view}" target="_blank" rel="noopener">${label}</a>`
+          : label;
+        row.innerHTML =
+          `<input type="checkbox" class="logsel" value="${esc(f.name)}"${keep.has(f.name) ? " checked" : ""} />` +
+          `<span class="fw-file__name" title="${esc(f.name)}"><span class="badge ${bk.cls}">${esc(bk.text)}</span>${zip}${name}</span>` +
+          `<span class="col-date">${fmtDate(f.mtime) || ""}</span>` +
+          `<span class="col-size">${fmtSize(f.size)}</span>`;
+        $("input", row).addEventListener("change", updateDayChecks);
+        wrap.appendChild(row);
+      });
+      box.appendChild(hdr); box.appendChild(wrap);
+    });
+    updateDayChecks();
+  }
+
+  function sortArrows() {
+    if (!o.sort) return;
+    $$(`${o.sort} button`).forEach((el) => {
+      const arr = el.querySelector(".arrow");
+      if (el.dataset.s === S.key) { el.classList.add("on"); if (arr) arr.textContent = S.dir > 0 ? "▲" : "▼"; }
+      else { el.classList.remove("on"); if (arr) arr.textContent = ""; }
+    });
+  }
+
+  // A day is bundled under its own name when the whole of it is picked; a lone
+  // loose file is served straight, without the round trip through a zip.
+  async function download() {
+    const sel = checked();
+    if (!sel.length) return;
+    const byDay = new Map();
+    visible().forEach((f) => { const d = logDay(f); (byDay.get(d) || byDay.set(d, []).get(d)).push(f.name); });
+    const selByDay = new Map();
+    sel.forEach((n) => {
+      const f = S.rows.find((x) => x.name === n); const d = f ? logDay(f) : "—";
+      (selByDay.get(d) || selByDay.set(d, []).get(d)).push(n);
+    });
+    const fullDays = []; let partial = false;
+    for (const [d, names] of selByDay) {
+      if (names.length === (byDay.get(d) || []).length) fullDays.push(d); else partial = true;
+    }
+    const zipname = (fullDays.length && !partial)
+      ? o.zipPrefix + fullDays.sort((a, b) => (dayKey(a) < dayKey(b) ? -1 : 1)).map(dayKey).join("-") + ".zip"
+      : o.zipPrefix + dayKey(logDay({ mtime: Date.now() / 1000 })) + ".zip";
+
+    if (sel.length === 1 && partial) {
+      const f = S.rows.find((x) => x.name === sel[0]);
+      saveBlobAs(logUrl(sel[0]), (f && f.file) || sel[0]);
+      return;
+    }
+    try {
+      const r = await fetch("/api/logs/download", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ names: sel, zipname }),
+      });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const url = URL.createObjectURL(await r.blob());
+      saveBlobAs(url, zipname);
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch (err) { toastErr(err); }
+  }
+
+  async function remove() {
+    const names = checked(); if (!names.length) return;
+    if (!(await confirmDialog(t("fw.confirmDelete"), { danger: true, okLabel: t("logs.delete") }))) return;
+    for (const n of names) { try { await api(logUrl(n), { method: "DELETE" }); } catch (e) {} }
+    load();
+  }
+
+  $(o.refresh)?.addEventListener("click", load);
+  $(o.download)?.addEventListener("click", download);
+  $(o.del)?.addEventListener("click", remove);
+  $(o.filter)?.addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    S.filter = b.dataset.f;
+    [...$(o.filter).children].forEach((x) => x.classList.toggle("on", x === b));
+    render();
   });
-  updateDayChecks();
+  $(o.sort)?.addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    const k = b.dataset.s;
+    if (S.key === k) S.dir = -S.dir;
+    else { S.key = k; S.dir = k === "name" ? 1 : -1; }
+    sortArrows(); render();
+  });
+  if (o.zip) {
+    $(o.zip.sel)?.addEventListener("change", async (e) => {
+      try {
+        await api("/api/config", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(o.zip.set(e.target.checked)),
+        });
+      } catch (err) { toastErr(err); }
+    });
+  }
+
+  return { load, render, rows: () => S.rows, checked };
 }
 
-const logChecked = () => [...document.querySelectorAll("#logsList .logsel:checked")].map((c) => c.value);
-
-function logSortArrows() {
-  $$("#logSort button").forEach((el) => {
-    const arr = el.querySelector(".arrow");
-    if (el.dataset.s === logSortKey) { el.classList.add("on"); if (arr) arr.textContent = logSortDir > 0 ? "▲" : "▼"; }
-    else { el.classList.remove("on"); if (arr) arr.textContent = ""; }
-  });
-}
-
-$("#logsRefresh").addEventListener("click", loadLogs);
-$("#logFilter").addEventListener("click", (e) => {
-  const b = e.target.closest("button"); if (!b) return;
-  logFilter = b.dataset.f;
-  [...$("#logFilter").children].forEach((x) => x.classList.toggle("on", x === b));
-  renderLogs();
-});
-$("#logSort").addEventListener("click", (e) => {
-  const b = e.target.closest("button"); if (!b) return;
-  const k = b.dataset.s;
-  if (logSortKey === k) logSortDir = -logSortDir;
-  else { logSortKey = k; logSortDir = k === "name" ? 1 : -1; }
-  logSortArrows();
-  renderLogs();
-});
-$("#logZip").addEventListener("change", async (e) => {
-  try {
-    await api("/api/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ logging: { zip_after: e.target.checked } }) });
-  } catch (err) { toastErr(err); }
-});
 function saveBlobAs(blobOrUrl, filename) {
   const a = document.createElement("a");
   a.href = blobOrUrl; a.download = filename;
   document.body.appendChild(a); a.click(); a.remove();
 }
-$("#logsDownloadBtn").addEventListener("click", async () => {
-  const sel = logChecked();
-  if (!sel.length) return;
-  // group the selection by day; a day is "full" when all its VISIBLE files are picked
-  const visible = logsVisible();
-  const byDay = new Map();
-  visible.forEach((f) => { const d = logDay(f); (byDay.get(d) || byDay.set(d, []).get(d)).push(f.name); });
-  const selByDay = new Map();
-  sel.forEach((n) => {
-    const f = logsData.find((x) => x.name === n); const d = f ? logDay(f) : "—";
-    (selByDay.get(d) || selByDay.set(d, []).get(d)).push(n);
-  });
-  const fullDays = []; let partial = false;
-  for (const [d, names] of selByDay) {
-    if (names.length === (byDay.get(d) || []).length) fullDays.push(d); else partial = true;
-  }
-  const ymd = (d) => d.replace(/-/g, "");
-  const today = ymd(logDay({ mtime: Date.now() / 1000 }));
-  const zipname = (fullDays.length && !partial)
-    ? "k-line-" + fullDays.sort().map(ymd).join("-") + ".log.zip"
-    : "k-line-" + today + ".log.zip";
 
-  if (sel.length === 1 && partial) {                       // lone loose file -> direct download
-    saveBlobAs("/api/logs/" + encodeURIComponent(sel[0]), sel[0]);
-    return;
-  }
-  try {                                                     // otherwise bundle into one zip
-    const r = await fetch("/api/logs/download", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ names: sel, zipname }),
-    });
-    if (!r.ok) throw new Error("HTTP " + r.status);
-    const url = URL.createObjectURL(await r.blob());
-    saveBlobAs(url, zipname);
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
-  } catch (err) { toastErr(err); }
+// ---------- the two instances ----------
+const rideLogs = makeLogBrowser({
+  list: "#logsList", sort: "#logSort", filter: "#logFilter", refresh: "#logsRefresh",
+  download: "#logsDownloadBtn", del: "#logsDeleteBtn",
+  url: "/api/logs?kind=ride", zipPrefix: "k-line-",
+  zip: { sel: "#logZip", get: (c) => c.logging.zip_after, set: (v) => ({ logging: { zip_after: v } }) },
+  badge: (f) => (f.kind === "raw" ? { cls: "raw", text: "raw" } : { cls: "dec", text: "dec" }),
+  onData: (d) => { setDiskFree($("#logsFree"), d); setLogsDest(d.dest, d.fallback, d.root); },
 });
-$("#logsDeleteBtn").addEventListener("click", async () => {
-  const names = logChecked(); if (!names.length) return;
-  if (!(await confirmDialog(t("fw.confirmDelete"), { danger: true, okLabel: t("logs.delete") }))) return;
-  for (const n of names) { try { await api("/api/logs/" + encodeURIComponent(n), { method: "DELETE" }); } catch (e) {} }
-  loadLogs();
+
+// Board artefacts: the diagnostics log and one file per firmware operation. Both
+// are readable as plain text, each through its own endpoint.
+const boardLogs = makeLogBrowser({
+  list: "#boardLogsList", sort: "#boardLogSort", filter: "#boardLogFilter",
+  refresh: "#boardLogsRefresh", download: "#boardLogsDownloadBtn", del: "#boardLogsDeleteBtn",
+  url: "/api/logs?kind=board", zipPrefix: "board-", emptyKey: "cfg.boardLogsEmpty",
+  zip: { sel: "#boardLogZip", get: (c) => c.diag.zip_after, set: (v) => ({ diag: { zip_after: v } }) },
+  badge: (f) => (f.kind === "fw" ? { cls: "raw", text: "fw" } : { cls: "dec", text: "deb" }),
+  view: (f) => (f.kind === "fw" ? "/api/firmware/log.txt?file=" : "/api/diag.txt?file=")
+    + encodeURIComponent(f.name),
 });
+
+const loadLogs = () => rideLogs.load();
+
+function setLogsDest(dest, fallback, root) {
+  const el = $("#logsDest");
+  if (!el) return;
+  const where = dest === "usb" ? t("storage.usb") : t("storage.internal");
+  el.classList.toggle("warn", !!fallback);
+  el.textContent = fallback
+    ? t("storage.fellBack")
+    : t("logs.dest") + ": " + where + (root ? " · " + root : "");
+}
+
 $("#logsPreviewBtn").addEventListener("click", async () => {
-  const dec = logsData.filter((f) => logChecked().includes(f.name) && f.kind === "decoded");
+  const sel = rideLogs.checked();
+  const dec = rideLogs.rows().filter((f) => sel.includes(f.name) && f.kind === "decoded");
   if (dec.length !== 1) { toast(t("logs.pickOneDecoded"), "warn"); return; }
   const name = dec[0].name;
   try {
-    const d = await api("/api/logs/" + encodeURIComponent(name) + "/data");
+    const d = await api(logUrl(name) + "/data");
     openChart(name, d.text);
   } catch (e) {
     toast(e.message === "too_large" ? t("logs.tooLarge") : t("banner.error") + " " + e.message, "err");
   }
 });
+
+// ---------- log storage: internal card or a USB stick ----------
+const fmtFs = (p) => (p.fs ? p.fs.toUpperCase() : t("storage.noFs"));
+
+async function loadStorage() {
+  const box = $("#storeList");
+  if (!box) return;
+  try { renderStorage(await api("/api/storage")); } catch (e) { toastErr(e); }
+}
+
+function renderStorage(d) {
+  const box = $("#storeList");
+  if (!box) return;
+  box.innerHTML = "";
+  setDiskFree($("#storeFree"), d);
+  const now = $("#storeNow");
+  if (now) {
+    now.classList.toggle("warn", !!d.fallback);
+    now.textContent = d.fallback
+      ? t("storage.fellBack")
+      : t("logs.dest") + ": " + (d.dest === "usb" ? t("storage.usb") : t("storage.internal"));
+  }
+
+  const mkRow = (label, sub, current) => {
+    const row = document.createElement("div");
+    row.className = "fwrow storerow";
+    row.innerHTML =
+      `<span class="fw-file__name">${current ? '<span class="badge dec">✓</span>' : ""}${esc(label)}</span>` +
+      `<span class="col-date">${esc(sub)}</span>`;
+    return row;
+  };
+  const addBtn = (row, key, cls, fn) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "mini" + (cls ? " " + cls : "");
+    b.textContent = t(key);
+    b.addEventListener("click", () => withBusy(b, fn));
+    row.appendChild(b);
+    return b;
+  };
+
+  const onInternal = d.dest !== "usb";
+  const iRow = mkRow(t("storage.internal"), "", onInternal);
+  if (!onInternal) addBtn(iRow, "storage.use", "", () => pickStorage({ dest: "internal" }));
+  box.appendChild(iRow);
+
+  (d.devices || []).forEach((dev) => {
+    const title = [dev.vendor, dev.model].filter(Boolean).join(" ") || dev.dev;
+    (dev.parts || []).forEach((p) => {
+      const row = mkRow(`${title} · ${p.label || p.dev}`,
+                        `${fmtFs(p)} · ${fmtSize(p.size)}`, !!p.active && d.dest === "usb");
+      if (p.usable && !(p.active && d.dest === "usb")) {
+        addBtn(row, "storage.use", "", () => pickStorage({ dest: "usb", uuid: p.uuid, dev: p.dev }));
+      }
+      if (p.mount) addBtn(row, "storage.eject", "", ejectStorage);
+      addBtn(row, "storage.format", "mini--danger", () => formatStorage(dev.dev, title, "exfat"));
+      box.appendChild(row);
+    });
+  });
+  if (!(d.devices || []).length) {
+    const p = document.createElement("p");
+    p.className = "hint";
+    p.textContent = t("storage.none");
+    box.appendChild(p);
+  }
+}
+
+async function pickStorage(body) {
+  try {
+    renderStorage(await api("/api/storage/select", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }));
+    toast(t("storage.switched"), "ok");
+  } catch (e) { toastErr(e); }
+}
+
+async function ejectStorage() {
+  try {
+    renderStorage(await api("/api/storage/unmount", { method: "POST" }));
+    toast(t("storage.ejected"), "ok");
+  } catch (e) { toastErr(e); }
+}
+
+// Irreversible: the whole stick is wiped, not just its partition. exFAT first
+// (no 4 GB file ceiling); if the board has no mkfs.exfat, offer FAT32 instead.
+async function formatStorage(dev, title, fs) {
+  const fsName = fs === "vfat" ? "FAT32" : "exFAT";
+  const ask = t("storage.fmtWarn").replace("{dev}", `${title} (${dev})`).replace("{fs}", fsName);
+  if (!(await confirmDialog(ask, { danger: true, okLabel: t("storage.fmtOk") }))) return;
+  try {
+    await api("/api/storage/format", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dev, fs, label: "LOGS" }),
+    });
+    toast(t("storage.fmtDone"), "ok");
+  } catch (e) {
+    if (e.message === "err.storage_no_mkfs" && fs !== "vfat") {
+      if (await confirmDialog(t("storage.noMkfs"), { okLabel: "FAT32" })) {
+        return formatStorage(dev, title, "vfat");
+      }
+      return;
+    }
+    toastErr(e);
+  }
+  loadStorage();
+}
 
 // ---------- log preview chart (canvas, zoom/pan, normalized series) ----------
 const CHART_COLORS = ["#2f6fd0", "#1f9d63", "#d33f3f", "#b9740a", "#7d3ac1", "#0aa2a2", "#c02f7a", "#5a7a1f", "#8a5a2b", "#3a5bd0"];

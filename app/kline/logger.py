@@ -14,6 +14,8 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
+from app.web.storage import day_name, resolve_root
+
 from .ecu_id import DEFAULT_FIELDS, describe, parse_fields
 from .params import ParamMap
 from .kwp2000 import KWP2000Session, NegativeResponse
@@ -67,7 +69,8 @@ class KLineWorker(threading.Thread):
         self.port = port
         self._ecu_fields = ecu_fields or DEFAULT_FIELDS
         self.params_path = params_path
-        self.log_dir = Path(log_dir)
+        # a path, or a callable answering "where do I write now" (StorageManager)
+        self._log_root = log_dir
         self.state = state
         self.led = led
         self.echo = echo
@@ -98,6 +101,14 @@ class KLineWorker(threading.Thread):
         self._raw_fh = None
         self._raw_path: Path | None = None
         self._raw_bytes = 0
+        # the root the open files live on, and when to next ask whether it moved
+        self._open_root: Path | None = None
+        self._root_check_at = 0.0
+        # diagnostics follow the recording, so events are emitted only while it
+        # runs; the link context is kept so link_up can open that file instead of
+        # being lost to the gate
+        self._diag_on = False
+        self._link_ctx: dict = {}
 
         # rli-scan (bus sweep) state: probe 0x21 <rli> across a range, log raw
         self._scan_on = False
@@ -375,8 +386,14 @@ class KLineWorker(threading.Thread):
 
     # -- diagnostics ------------------------------------------------------
     def _diag(self, kind: str, **fields) -> None:
-        """Best-effort note into the board diagnostics log (may be disabled)."""
-        if self.diag is not None:
+        """Best-effort note into the board diagnostics log.
+
+        Gated on the log actually running: an event writes through DiagLog's
+        open-on-demand path, so an ungated one would create a diagnostics file
+        for a bike parked with the ignition off — which is exactly what the log
+        is not for.
+        """
+        if self.diag is not None and self._diag_on:
             self.diag.event(kind, **fields)
 
     def stats(self) -> dict:
@@ -393,7 +410,23 @@ class KLineWorker(threading.Thread):
         }
 
     # -- logging file management (worker thread) --------------------------
+    @property
+    def log_dir(self) -> Path:
+        """Where logs go *right now*.
+
+        Asked again at every file open, because StorageManager answers with the
+        USB stick or the SD card depending on what is plugged in this second.
+        """
+        return resolve_root(self._log_root)
+
+    def _log_target(self) -> Path:
+        """The day folder inside the active root, created on demand."""
+        d = self.log_dir / day_name()
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
     def _reconcile_logging(self) -> None:
+        self._reconcile_storage()
         if self._want_dec and self._dec_fh is None:
             self._open_dec()
         elif not self._want_dec and self._dec_fh is not None:
@@ -402,11 +435,62 @@ class KLineWorker(threading.Thread):
             self._open_raw()
         elif not self._want_raw and self._raw_fh is not None:
             self._close_raw("disarmed")
+        self._reconcile_diag()
+
+    def _reconcile_storage(self) -> None:
+        """Follow the log destination when it moves out from under the open file.
+
+        The stick can be pulled mid-ride, or the rider can switch destination
+        from the phone. Either way the file is now on the wrong disk, so it is
+        closed and reopened where writes actually land. Rate-limited to once a
+        second because answering the question reads /proc/mounts.
+        """
+        if self._open_root is None:
+            return
+        now = time.monotonic()
+        if now < self._root_check_at:
+            return
+        self._root_check_at = now + 1.0
+        root = self.log_dir
+        if root == self._open_root:
+            return
+        self._diag("log_dest", frm=self._open_root.name, to=root.name)
+        if self._dec_fh is not None:
+            self._close_dec("storage_changed")
+            self._open_dec()
+        if self._raw_fh is not None:
+            self._close_raw("storage_changed")
+            self._open_raw()
+
+    def _reconcile_diag(self) -> None:
+        """The diagnostics log runs exactly as long as a ride log is open.
+
+        Writing it around the clock buys nothing and costs SD-card life: what it
+        is for is naming the hardware fault behind a log that split mid-ride.
+        """
+        if self.diag is None:
+            return
+        want = (self._dec_fh is not None or self._raw_fh is not None
+                or self._scan_fh is not None)
+        if want == self._diag_on:
+            return
+        try:
+            if want:
+                self.diag.start()
+                self._diag_on = True
+                if self._link_ctx:
+                    self._diag("link_up", **self._link_ctx)
+            else:
+                self._diag_on = False
+                self.diag.stop()
+        except Exception:       # pragma: no cover - diagnostics never bite
+            self._diag_on = want
 
     def _open_dec(self) -> None:
-        self.log_dir.mkdir(parents=True, exist_ok=True)
+        self._open_root = self.log_dir
+        d = self._log_target()
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-        self._dec_path = self.log_dir / f"kline-dec-{ts}.csv"
+        self._dec_path = d / f"kline-dec-{ts}.csv"
         self._dec_fh = self._dec_path.open("a", buffering=1)
         # guzzidiag-style CSV: time + one column per *selected* parameter
         with self._lock:
@@ -416,6 +500,10 @@ class KLineWorker(threading.Thread):
         self._dec_bytes = len(header)
         self._dec_rows = 0
         self.state.set_decoded_file(str(self._dec_path), 0)
+        # the diagnostics log has to be up before this line, or the event that
+        # names the file the ride is being written to would be the one event the
+        # gate swallows
+        self._reconcile_diag()
         self._diag("log_open", file=self._dec_path.name, cols=len(self._dec_cols))
 
     def _close_dec(self, reason: str = "link_lost") -> None:
@@ -424,6 +512,8 @@ class KLineWorker(threading.Thread):
             try:
                 self._dec_fh.flush()
                 self._dec_fh.close()
+            except OSError:
+                pass        # the stick was pulled; the handle is already dead
             finally:
                 self._dec_fh = None
             self._maybe_zip(path)
@@ -431,9 +521,10 @@ class KLineWorker(threading.Thread):
         self.state.set_decoded_file("", 0)
 
     def _open_raw(self) -> None:
-        self.log_dir.mkdir(parents=True, exist_ok=True)
+        self._open_root = self.log_dir
+        d = self._log_target()
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-        self._raw_path = self.log_dir / f"kline-{ts}.raw.log"
+        self._raw_path = d / f"kline-{ts}.raw.log"
         self._raw_fh = self._raw_path.open("a", buffering=1)
         self._raw_bytes = 0
         self.state.set_raw_file(str(self._raw_path), 0)
@@ -444,6 +535,8 @@ class KLineWorker(threading.Thread):
             try:
                 self._raw_fh.flush()
                 self._raw_fh.close()
+            except OSError:
+                pass        # the stick was pulled; the handle is already dead
             finally:
                 self._raw_fh = None
             self._maybe_zip(path)
@@ -466,15 +559,19 @@ class KLineWorker(threading.Thread):
         self._close_dec(reason)
         self._close_raw(reason)
         self._close_scan()
+        self._open_root = None
+        self._reconcile_diag()
+        self._link_ctx = {}
 
     # -- rli-scan files ---------------------------------------------------
     def _open_scan(self, start: int, end: int) -> None:
-        self.log_dir.mkdir(parents=True, exist_ok=True)
+        self._open_root = self.log_dir
+        d = self._log_target()
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-        self._scan_path = self.log_dir / f"scan-{ts}.ndjson"
+        self._scan_path = d / f"scan-{ts}.ndjson"
         self._scan_fh = self._scan_path.open("a", buffering=1)
         # wide CSV alongside: time + one r<HH> column per rli in range (16-bit value)
-        csv_path = self.log_dir / f"scan-{ts}.csv"
+        csv_path = d / f"scan-{ts}.csv"
         self._scan_csv = csv_path.open("a", buffering=1)
         cols = ["r%02X" % r for r in range(start, end + 1)]
         self._scan_csv.write("time," + ",".join(cols) + "\n")
@@ -508,7 +605,13 @@ class KLineWorker(threading.Thread):
         row = iso + "," + ",".join(
             "" if values.get(k) is None else str(values.get(k)) for k in self._dec_cols
         ) + "\n"
-        self._dec_fh.write(row)
+        try:
+            self._dec_fh.write(row)
+        except OSError as exc:
+            # the disk went away between two destination checks: drop the file
+            # and let _reconcile_logging reopen it wherever writes land now
+            self._drop_file("dec", exc)
+            return
         self._dec_bytes += len(row)
         self._dec_rows += 1
         self.state.inc_decoded_records()
@@ -517,9 +620,25 @@ class KLineWorker(threading.Thread):
         if self._raw_fh is None:
             return
         line = json.dumps(rec, separators=(",", ":")) + "\n"
-        self._raw_fh.write(line)
+        try:
+            self._raw_fh.write(line)
+        except OSError as exc:
+            self._drop_file("raw", exc)
+            return
         self._raw_bytes += len(line)
         self.state.inc_raw_records()
+
+    def _drop_file(self, which: str, exc: Exception) -> None:
+        """Abandon a log whose disk disappeared, without taking the link down."""
+        self._diag("log_write_fail", stream=which, err=type(exc).__name__)
+        if which == "dec":
+            self._dec_fh = None
+            self.state.set_decoded_file("", 0)
+        else:
+            self._raw_fh = None
+            self.state.set_raw_file("", 0)
+        self._open_root = None
+        self._root_check_at = 0.0
 
     # -- main loop --------------------------------------------------------
     def run(self) -> None:
@@ -563,9 +682,12 @@ class KLineWorker(threading.Thread):
                 self.state.set_status("connected", ecu_id or "")
                 self._link_at = time.monotonic()
                 self._last_fail = ""
-                self._diag("link_up", baud=baud,
-                           init="slow" if self._init_slow else "fast",
-                           ecu=(ecu_id or "?").split()[0] if ecu_id else "?")
+                # not emitted here: the file does not exist until the first log
+                # opens, a moment later, and this is the line worth having at its top
+                self._link_ctx = {
+                    "baud": baud, "init": "slow" if self._init_slow else "fast",
+                    "ecu": (ecu_id or "?").split()[0] if ecu_id else "?",
+                }
                 with self._lock:
                     scan = self._scan_on
                 if scan:

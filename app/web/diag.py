@@ -25,17 +25,21 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
+from .storage import day_name, resolve_root
+
 log = logging.getLogger("onboard.diag")
 
 # Kernel lines worth keeping. The 2026-08-26 hub drop shows up as "disabled by
 # hub (EMI?)" on usb2-port1 plus ftdi_sio/rt2x00 disconnects, so the filter has
 # to cover the hub, both devices behind it and the controller underneath.
 KMSG_RE = re.compile(
-    r"usb|ftdi|ttyUSB|wlan|rt2x00|ieee80211|hub|xhci|dwc2|EMI|voltage|thermal",
+    r"usb|ftdi|ttyUSB|wlan|rt2x00|ieee80211|hub|xhci|dwc2|EMI|voltage|thermal"
+    r"|usb-storage|scsi|sd \d+:|I/O error|exfat|FAT-fs",
     re.I,
 )
 
-DEFAULTS = {"enabled": True, "interval_s": 5, "max_mb": 2, "keep": 10, "kmsg": True}
+DEFAULTS = {"enabled": True, "interval_s": 5, "max_mb": 2, "keep": 10, "kmsg": True,
+            "zip_after": False}
 MIN_INTERVAL_S = 1.0
 MIN_MAX_MB = 0.05          # a limit below this would rotate faster than it writes
 
@@ -193,7 +197,9 @@ class DiagLog:
         sys_root: str = "/sys",
         dev_root: str = "/dev",
     ):
-        self.log_dir = Path(log_dir)
+        # a path, or a callable answering "where do I write now" — the same
+        # root the ride log is using, so both land in one day folder
+        self._log_root = log_dir
         self.sys_root = Path(sys_root)
         self.dev_root = Path(dev_root)
         self._probe = probe             # () -> dict of app-side fields
@@ -210,6 +216,12 @@ class DiagLog:
         self.max_bytes = int(max(MIN_MAX_MB, float(c["max_mb"])) * 1024 * 1024)
         self.keep = max(1, int(c["keep"]))
         self.kmsg = bool(c["kmsg"])
+        # also read by FirmwareManager for its own fw-*.log files
+        self.zip_after = bool(c["zip_after"])
+
+    @property
+    def log_dir(self) -> Path:
+        return resolve_root(self._log_root)
 
     # -- lifecycle --------------------------------------------------------
     def start(self) -> None:
@@ -231,6 +243,11 @@ class DiagLog:
         self._threads.append(t)
 
     def stop(self) -> None:
+        # the log is tied to a ride now, so stop() is called after every one of
+        # them; without this an idle stop would open a fresh file just to write
+        # STOP into it
+        if not self._threads and self._fh is None:
+            return
         self.event("stop")
         self._stop.set()
         if self._kmsg_reader is not None:
@@ -240,11 +257,12 @@ class DiagLog:
             t.join(timeout=2.0)
         self._threads = []
         with self._lock:
-            self._close_locked(zip_it=False)
+            self._close_locked(zip_it=self.zip_after)
 
     def apply(self, cfg: dict | None) -> None:
         """Live-apply the System-tab settings (enable/disable, size limit)."""
         c = {**DEFAULTS, **(cfg or {})}
+        self.zip_after = bool(c["zip_after"])
         self.interval_s = max(MIN_INTERVAL_S, float(c["interval_s"]))
         self.max_bytes = int(max(MIN_MAX_MB, float(c["max_mb"])) * 1024 * 1024)
         self.keep = max(1, int(c["keep"]))
@@ -300,14 +318,15 @@ class DiagLog:
     # -- file management --------------------------------------------------
     def _open_locked(self) -> None:
         try:
-            self.log_dir.mkdir(parents=True, exist_ok=True)
+            d = self.log_dir / day_name()
+            d.mkdir(parents=True, exist_ok=True)
             ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-            path = self.log_dir / f"diag-{ts}.log"
+            path = d / f"diag-{ts}.log"
             # a rotation inside the same second must not land on the file the
             # zip thread is still reading
             n = 1
             while path.exists() or path.with_name(path.name + ".zip").exists():
-                path = self.log_dir / f"diag-{ts}-{n}.log"
+                path = d / f"diag-{ts}-{n}.log"
                 n += 1
             self._path = path
             self._fh = path.open("a", buffering=1)
@@ -353,7 +372,9 @@ class DiagLog:
         try:
             # by mtime, not by name: a rotation inside one second yields
             # "diag-<ts>-1.log.zip", which sorts *before* "diag-<ts>.log.zip"
-            zips = sorted(self.log_dir.glob("diag-*.log.zip"),
+            # rglob, not glob: the archives live in per-day folders now, and
+            # a flat glob would quietly stop pruning anything at all
+            zips = sorted(self.log_dir.rglob("diag-*.log.zip"),
                           key=lambda p: p.stat().st_mtime)
             for old in zips[:-self.keep]:
                 old.unlink(missing_ok=True)

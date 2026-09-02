@@ -5,6 +5,7 @@ import os
 import stat
 import sys
 import tempfile
+import zipfile
 import time
 from pathlib import Path
 
@@ -183,7 +184,7 @@ def _fake_dev(root: Path) -> str:
     return str(dev)
 
 
-def _run_util(tmp, body, rc=0, verbose=False, op="read", fw_size=0):
+def _run_util(tmp, body, rc=0, verbose=False, op="read", fw_size=0, diag=None):
     """Start a real (fake) subprocess through the manager and wait for it."""
     tmp = Path(tmp)
     logs = tmp / "logs"
@@ -192,6 +193,7 @@ def _run_util(tmp, body, rc=0, verbose=False, op="read", fw_size=0):
         worker_getter=lambda: None, util_path=_fake_util(tmp, body, rc),
         fw_dir=str(tmp), port=str(Path(dev) / "kline"), state=State(),
         log_dir=str(logs), dev_root=dev, sys_root=str(tmp / "sys"), fw_size=fw_size,
+        diag=diag,
     )
     if op == "write":
         (tmp / "img.bin").write_bytes(b"\x5a" * 4096)
@@ -202,12 +204,26 @@ def _run_util(tmp, body, rc=0, verbose=False, op="read", fw_size=0):
     return fm, logs
 
 
+def test_finished_operation_log_is_archived_when_asked():
+    """One switch in Config -> System archives both board log kinds."""
+    with tempfile.TemporaryDirectory() as tmp:
+        diag = type("D", (), {"zip_after": True, "event": staticmethod(lambda *a, **k: None)})()
+        fm, logs = _run_util(tmp, 'printf "x" > "$2"', diag=diag)
+        assert fm.status()["result"] == "ok"
+        assert not list(logs.rglob("fw-*.log")), "the plain file is replaced by its archive"
+        zips = list(logs.rglob("fw-*.log.zip"))
+        assert len(zips) == 1, zips
+        with zipfile.ZipFile(zips[0]) as z:
+            assert "FW start op=reading" in z.read(z.namelist()[0]).decode()
+        assert fm._vlog_path == zips[0], "the manager names the file that exists"
+
+
 def test_verbose_log_records_the_whole_operation():
     with tempfile.TemporaryDirectory() as tmp:
         fm, logs = _run_util(
             tmp, 'echo "[+] reading block 1"; printf "x" > "$2"; echo "[+] done"')
         assert fm.status()["result"] == "ok"
-        files = list(logs.glob("fw-reading-*.log"))
+        files = list(logs.rglob("fw-reading-*.log"))
         assert len(files) == 1, files
         text = files[0].read_text()
         assert "FW start op=reading name=out.bin" in text
@@ -223,7 +239,7 @@ def test_failure_reason_is_in_the_file_and_the_ui():
         fm, logs = _run_util(tmp, 'echo "chatter"; echo "ERROR: no reply from ECU"',
                              rc=3, op="write")
         assert fm.status()["result"] == "error"
-        text = next(iter(logs.glob("fw-writing-*.log"))).read_text()
+        text = next(iter(logs.rglob("fw-writing-*.log"))).read_text()
         assert "UTIL ERROR: no reply from ECU" in text
         assert "FW exit rc=3" in text and "FW end result=error" in text
         assert "FW image size=4096 sha256=" in text     # what was about to be flashed
@@ -241,7 +257,7 @@ def test_zero_exit_with_an_error_line_is_still_a_failure():
             rc=0)
         assert fm.status()["result"] == "error"
         assert "ioctl: Bad file descriptor" in fm.status()["progress"]
-        text = next(iter(logs.glob("fw-reading-*.log"))).read_text()
+        text = next(iter(logs.rglob("fw-reading-*.log"))).read_text()
         assert "\x1b[" not in text          # ANSI colour stripped before logging
         assert "FW verdict " in text
 

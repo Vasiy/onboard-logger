@@ -57,7 +57,15 @@
     "interval_s": 5,
     "max_mb": 2,
     "keep": 10,
-    "kmsg": true
+    "kmsg": true,
+    "zip_after": false
+  },
+  "storage": {
+    "dest": "internal",
+    "usb_uuid": "",
+    "mount_point": "/media/usb0",
+    "auto_mount": true,
+    "poll_s": 3
   },
   "locale": "en",
   "log_dir": "/root/k-line",

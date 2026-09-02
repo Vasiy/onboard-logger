@@ -29,6 +29,7 @@ from .kline.logger import KLineWorker
 from .web import system
 from .web.config_mgr import ConfigManager, REPO_DIR, _deep_merge
 from .web.diag import DiagLog
+from .web.storage import StorageManager, parse_day
 from .web.wifi_scan import scan_networks
 from .web.firmware import FirmwareBlocked, FirmwareManager
 from .web import fw_catalog, fw_guard
@@ -53,6 +54,42 @@ def _safe_name(name: str) -> str:
     if not base or not all(c.isalnum() or c in "._-" for c in base):
         raise ValueError("недопустимое имя файла")
     return base
+
+
+def _safe_rel(name: str) -> str:
+    """A log's path relative to the log root: ``file`` or ``DD-MM-YYYY/file``.
+
+    Logs live in one folder per day now, so the old basename-only rule would
+    reject every current file. Exactly two segments are allowed and the first
+    has to be a real day folder, which is what keeps ``..`` out; the resolve()
+    check at the call site is the second lock on the same door.
+    """
+    parts = [q for q in str(name).replace("\\", "/").split("/") if q]
+    if not parts or len(parts) > 2 or any(q in (".", "..") for q in parts):
+        raise ValueError("недопустимое имя файла")
+    if len(parts) == 2 and parse_day(parts[0]) is None:
+        raise ValueError("недопустимое имя файла")
+    return "/".join(parts[:-1] + [_safe_name(parts[-1])])
+
+
+def _logs_root() -> Path:
+    """The directory the log endpoints read.
+
+    Goes through StorageManager so a reader and the worker can never disagree
+    about where the logs are — before this they read the config independently.
+    """
+    if storage is not None:
+        return storage.active_root()
+    return Path(cm.load()["log_dir"])
+
+
+def _log_file(rel: str) -> Path | None:
+    """Resolve a validated relative name inside the log root, or None."""
+    root = _logs_root().resolve()
+    p = (root / rel).resolve()
+    if not p.is_relative_to(root) or not p.is_file():
+        return None
+    return p
 
 
 def _unique_name(directory: Path, name: str) -> str:
@@ -272,6 +309,7 @@ cm = ConfigManager()
 worker: KLineWorker | None = None
 fwm: FirmwareManager | None = None
 diag: DiagLog | None = None
+storage: StorageManager | None = None
 
 
 def _after_network(cfg: dict, rep: dict) -> None:
@@ -292,7 +330,7 @@ def _after_network(cfg: dict, rep: dict) -> None:
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
-    global worker, fwm, diag
+    global worker, fwm, diag, storage
     # uvicorn configures only its own loggers; without this the diagnostics
     # events never reach journald (and from there /var/log/syslog)
     logging.basicConfig(level=logging.INFO, format="%(name)s %(message)s")
@@ -313,14 +351,20 @@ async def lifespan(app: FastAPI):
     if not ecu_id_path.exists():
         ecu_id_path = REPO_DIR / "config" / "ecu_id.json"
     ecu_fields = load_fields(ecu_id_path)
-    diag = DiagLog(cfg["log_dir"], cfg.get("diag"),
+    storage = StorageManager(
+        cfg["log_dir"], cfg.get("storage"),
+        on_change=lambda st: state.set_storage(st["dest"], st["root"], st["fallback"]))
+    storage.start()
+    state.set_storage(storage.dest, str(storage.active_root()), storage.fallback())
+    # both writers ask the manager where to write at every file open, so a stick
+    # plugged, pulled or picked takes effect without a restart
+    diag = DiagLog(storage.active_root, cfg.get("diag"),
                    probe=lambda: {**(worker.stats() if worker else {}),
                                   "link": state.snapshot().get("status", "")})
-    diag.start()
     worker = KLineWorker(
         port=cfg["kline"]["port"],
         params_path=_params_path(),
-        log_dir=cfg["log_dir"],
+        log_dir=storage.active_root,
         state=state,
         led=led,
         log_decoded_default=cfg.get("logging", {}).get("decoded_default", True),
@@ -364,6 +408,8 @@ async def lifespan(app: FastAPI):
             worker.join(timeout=3.0)
         if diag is not None:
             diag.stop()
+        if storage is not None:
+            storage.stop()
 
 
 app = FastAPI(title="Onboard Logger", lifespan=lifespan)
@@ -936,6 +982,8 @@ async def post_config(payload: dict):
     cm.save(cfg)
     if diag is not None:
         diag.apply(cfg.get("diag"))
+    if storage is not None:
+        storage.apply(cfg.get("storage"))
     if worker is not None:  # apply live, no reboot
         worker.set_zip_after(cfg.get("logging", {}).get("zip_after", False))
         kp, kn = prev.get("kline", {}), cfg.get("kline", {})
@@ -953,6 +1001,81 @@ async def post_config(payload: dict):
 
     asyncio.create_task(_apply())
     return report
+
+
+# -- storage ---------------------------------------------------------------
+# Their own endpoints rather than /api/config keys: picking a destination has to
+# mount something, and a config POST would drag apply_network along with it.
+def _storage_state() -> dict:
+    st = storage.status()
+    state.set_storage(st["dest"], st["root"], st["fallback"])
+    return {**st, **_disk_free(Path(st["root"]))}
+
+
+@app.get("/api/storage")
+async def get_storage():
+    if storage is None:
+        return {"dest": "internal", "devices": [], "error": "err.storage_off"}
+    return _storage_state()
+
+
+@app.post("/api/storage/select")
+async def post_storage_select(payload: dict):
+    """Choose the log destination, and remember the stick that was chosen."""
+    if storage is None:
+        return JSONResponse(status_code=503, content={"error": "err.storage_off"})
+    res = await asyncio.to_thread(
+        storage.select, str(payload.get("dest", "internal")),
+        str(payload.get("uuid", "")), str(payload.get("dev", "")))
+    if not res.get("ok"):
+        return JSONResponse(status_code=400, content=res)
+    cfg = cm.load()
+    st = cfg.setdefault("storage", {})
+    st["dest"], st["usb_uuid"] = storage.dest, storage.usb_uuid
+    cm.save(cfg)
+    return _storage_state()
+
+
+@app.post("/api/storage/mount")
+async def post_storage_mount(payload: dict):
+    if storage is None:
+        return JSONResponse(status_code=503, content={"error": "err.storage_off"})
+    res = await asyncio.to_thread(storage.mount, str(payload.get("dev", "")),
+                                  str(payload.get("uuid", "")))
+    if not res.get("ok"):
+        return JSONResponse(status_code=400, content=res)
+    return _storage_state()
+
+
+@app.post("/api/storage/unmount")
+async def post_storage_unmount():
+    """Safe eject. The destination stays "usb" so re-plugging just works."""
+    if storage is None:
+        return JSONResponse(status_code=503, content={"error": "err.storage_off"})
+    res = await asyncio.to_thread(storage.unmount)
+    if not res.get("ok"):
+        return JSONResponse(status_code=400, content=res)
+    return _storage_state()
+
+
+@app.post("/api/storage/format")
+async def post_storage_format(payload: dict):
+    """Erase a stick and lay down one exFAT/FAT32 partition. Irreversible.
+
+    Refuses while a log is open: the worker may be writing to the very device
+    the request wants to wipe.
+    """
+    if storage is None:
+        return JSONResponse(status_code=503, content={"error": "err.storage_off"})
+    if worker is not None and (state.snapshot().get("log_decoded_file")
+                               or state.snapshot().get("log_raw_file")):
+        return JSONResponse(status_code=409, content={"error": "err.storage_recording"})
+    res = await asyncio.to_thread(
+        storage.format, str(payload.get("dev", "")),
+        str(payload.get("fs", "exfat")), str(payload.get("label", "LOGS")))
+    if not res.get("ok"):
+        return JSONResponse(status_code=400, content=res)
+    return {**res, **_storage_state()}
 
 
 # -- power -----------------------------------------------------------------
@@ -997,91 +1120,129 @@ def post_time_auto(payload: dict):
 
 
 # -- logs ------------------------------------------------------------------
+# what a file is, and which of the two lists it belongs to: the Logs tab shows
+# rides, Config -> System shows the board's own artefacts
+KIND_GROUPS = {"ride": ("decoded", "raw"), "board": ("diag", "fw")}
+
+
 def _log_kind(name: str) -> str:
     if name.startswith("diag-"):
         return "diag"
+    if name.startswith("fw-"):
+        return "fw"
     return "raw" if (".raw.log" in name or name.endswith(".ndjson") or "-raw-" in name) else "decoded"
 
 
-def _is_ride_log(name: str) -> bool:
-    """What belongs in the Logs tab. Firmware operation logs deliberately do not:
-    they are a Config -> System affair, listed by /api/firmware/logs."""
-    if name.startswith("fw-"):
-        return False
-    return (name.endswith(".csv") or name.endswith(".raw.log") or name.endswith(".ndjson")
-            or name.endswith(".zip") or name.startswith("diag-"))
+def _is_log(name: str) -> bool:
+    return (name.endswith(".csv") or name.endswith(".raw.log")
+            or name.endswith(".ndjson") or name.endswith(".zip")
+            or name.startswith("diag-") or name.startswith("fw-"))
 
 
 @app.get("/api/logs")
-async def list_logs():
-    cfg = cm.load()
-    log_dir = Path(cfg["log_dir"])
+async def list_logs(kind: str = ""):
+    """Logs from the day folders plus whatever is still loose in the root.
+
+    The flat files predate the per-day layout; they are listed rather than moved
+    so a board that has been recording for months does not have its history
+    rearranged under it. ``kind`` filters to one class (the System tab asks for
+    "board") so a second endpoint with its own path checks is not needed;
+    ``kind`` takes one class ("decoded", "raw", "diag", "fw") or a group name
+    from KIND_GROUPS.
+    """
+    root = _logs_root()
     files = []
-    if log_dir.is_dir():
-        for p in log_dir.iterdir():
+
+    def _collect(d: Path, day: str) -> None:
+        for p in d.iterdir():
             n = p.name
-            if not _is_ride_log(n):
+            if not p.is_file() or not _is_log(n):
+                continue
+            k = _log_kind(n)
+            if kind and k != kind and k not in KIND_GROUPS.get(kind, ()):
                 continue
             st = p.stat()
             files.append({
-                "name": n, "size": st.st_size, "mtime": st.st_mtime,
-                "kind": _log_kind(n), "zip": n.endswith(".zip"),
+                "name": f"{day}/{n}" if day else n, "file": n, "day": day,
+                "size": st.st_size, "mtime": st.st_mtime,
+                "kind": k, "zip": n.endswith(".zip"),
             })
+
+    if root.is_dir():
+        try:
+            _collect(root, "")
+            for d in root.iterdir():
+                if d.is_dir() and parse_day(d.name):
+                    _collect(d, d.name)
+        except OSError:
+            pass
     files.sort(key=lambda f: f["mtime"], reverse=True)
-    return {"dir": str(log_dir), "files": files, **_disk_free(log_dir)}
+    st = storage.status(with_devices=False) if storage is not None else {}
+    return {"dir": str(root), "root": str(root), "files": files,
+            "dest": st.get("dest", "internal"), "is_usb": st.get("is_usb", False),
+            "fallback": st.get("fallback", ""), **_disk_free(root)}
+
+
+def _board_log_text(file: str, prefix: str, lines: int) -> PlainTextResponse:
+    """A board artefact (diag-*, fw-*) as text, from the root or a day folder.
+
+    An archived .zip is bytes, not a page — it is refused here and downloaded
+    through /api/logs/{name} instead.
+    """
+    root = _logs_root().resolve()
+    try:
+        rel = _safe_rel(file)
+    except ValueError:
+        return PlainTextResponse("bad name\n", status_code=400)
+    path = (root / rel).resolve()
+    base = Path(rel).name
+    if (not base.startswith(prefix) or base.endswith(".zip")
+            or root not in path.parents or not path.is_file()):
+        return PlainTextResponse("not found\n", status_code=404)
+    return _tail_text(path, lines)
+
+
+def _tail_text(path: Path, lines: int) -> PlainTextResponse:
+    try:
+        tail = path.read_text(errors="replace").splitlines()[-max(1, min(int(lines), 20000)):]
+    except OSError as exc:
+        return PlainTextResponse(f"{path.name}: {exc}\n")
+    return PlainTextResponse(f"# {path}\n" + "\n".join(tail) + "\n")
 
 
 @app.get("/api/diag.txt")
-def diag_text(lines: int = 200):
+def diag_text(lines: int = 200, file: str = ""):
     """The board diagnostics log as plain text, for a phone with no shell.
 
-    Carries the current health line plus the tail of the open file, so the
-    kernel's USB/Wi-Fi messages and our link events are read in one place.
+    Without ``file``: the current health line plus the tail of the open file, so
+    the kernel's USB/Wi-Fi messages and our link events are read in one place.
+    With ``file``: that closed file's tail — an archived .zip is a download, not
+    text, so it is rejected here.
     """
+    if file:
+        return _board_log_text(file, "diag-", lines)
     if diag is None or not diag.enabled:
         return PlainTextResponse("diagnostics log is off\n")
+    if not diag.current_file():
+        # the log is tied to a ride: nothing is written while nothing is recorded
+        return PlainTextResponse("diagnostics log is idle (no recording)\n")
     head = (f"# {diag.current_file()}  limit={diag.max_bytes // 1048576}MB "
             f"keep={diag.keep} interval={diag.interval_s}s\n"
             "# NOW " + diag.render(diag.health()) + "\n")
     return PlainTextResponse(head + diag.tail(max(1, min(int(lines), 5000))) + "\n")
 
 
-@app.get("/api/firmware/logs")
-def firmware_logs():
-    """The verbose per-operation files, newest first. Config -> System shows these;
-    the Logs tab does not, so a flash log never hides among the ride logs."""
-    log_dir = Path(cm.load()["log_dir"])
-    files = []
-    if log_dir.is_dir():
-        for p in sorted(log_dir.glob("fw-*.log")):
-            st = p.stat()
-            files.append({"name": p.name, "size": st.st_size, "mtime": st.st_mtime,
-                          "op": p.name.split("-")[1] if "-" in p.name else ""})
-    files.sort(key=lambda f: f["mtime"], reverse=True)
-    return {"files": files[:40], "current": fwm._vlog_path.name if (fwm and fwm._vlog_path) else ""}
-
-
 @app.get("/api/firmware/log.txt")
 def firmware_log_text(lines: int = 400, file: str = ""):
     """One firmware operation log as plain text (default: the latest one)."""
-    log_dir = Path(cm.load()["log_dir"]).resolve()
     if file:
-        try:
-            name = _safe_name(file)
-        except ValueError:
-            return PlainTextResponse("bad name\n", status_code=400)
-        path = (log_dir / name).resolve()
-        if not name.startswith("fw-") or path.parent != log_dir or not path.is_file():
-            return PlainTextResponse("not found\n", status_code=404)
-    elif fwm is None or not fwm._vlog_path:
+        return _board_log_text(file, "fw-", lines)
+    if fwm is None or not fwm._vlog_path:
         return PlainTextResponse("no firmware operation has run yet\n")
-    else:
-        path = Path(fwm._vlog_path)
-    try:
-        tail = path.read_text(errors="replace").splitlines()[-max(1, min(int(lines), 20000)):]
-    except OSError as exc:
-        return PlainTextResponse(f"{path.name}: {exc}\n")
-    return PlainTextResponse(f"# {path}\n" + "\n".join(tail) + "\n")
+    path = Path(fwm._vlog_path)
+    if path.suffix == ".zip":
+        return PlainTextResponse(f"# {path.name} is archived — download it from Config → System\n")
+    return _tail_text(path, lines)
 
 
 @app.post("/api/logs/download")
@@ -1091,7 +1252,6 @@ def logs_download(payload: dict):
     Body: {"names": [...], "zipname": "k-line-....log.zip"}. Names are validated and
     confined to the log dir; a selected .zip is stored as-is. Sync def -> threadpool.
     """
-    log_dir = Path(cm.load()["log_dir"]).resolve()
     zipname = _safe_name(payload.get("zipname", "k-line.log.zip"))
     if not zipname.endswith(".zip"):
         zipname += ".zip"
@@ -1099,11 +1259,12 @@ def logs_download(payload: dict):
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for raw in payload.get("names", []):
             try:
-                name = _safe_name(str(raw))
+                name = _safe_rel(str(raw))
             except ValueError:
                 continue
-            p = (log_dir / name).resolve()
-            if p.parent == log_dir and p.is_file():
+            p = _log_file(name)
+            if p is not None:
+                # arcname keeps the day folder, so the zip mirrors the board
                 z.write(p, arcname=name)
     buf.seek(0)
     return StreamingResponse(
@@ -1112,12 +1273,14 @@ def logs_download(payload: dict):
     )
 
 
-@app.get("/api/logs/{name}")
+@app.get("/api/logs/{name:path}")
 async def get_log(name: str):
-    cfg = cm.load()
-    log_dir = Path(cfg["log_dir"])
-    path = (log_dir / name).resolve()
-    if path.parent != log_dir.resolve() or not path.is_file():
+    try:
+        name = _safe_rel(name)
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"error": str(exc)})
+    path = _log_file(name)
+    if path is None:
         return JSONResponse(status_code=404, content={"error": "не найдено"})
     if name.endswith(".zip"):
         media = "application/zip"
@@ -1125,37 +1288,40 @@ async def get_log(name: str):
         media = "text/csv"
     else:
         media = "application/x-ndjson"
-    return FileResponse(path, filename=name, media_type=media)
+    return FileResponse(path, filename=path.name, media_type=media)
 
 
-@app.delete("/api/logs/{name}")
+@app.delete("/api/logs/{name:path}")
 async def delete_log(name: str):
-    cfg = cm.load()
-    log_dir = Path(cfg["log_dir"])
     try:
-        name = _safe_name(name)
+        name = _safe_rel(name)
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
-    path = (log_dir / name).resolve()
-    if path.parent != log_dir.resolve() or not path.is_file():
+    path = _log_file(name)
+    if path is None:
         return JSONResponse(status_code=404, content={"error": "не найдено"})
     path.unlink()
+    # an emptied day folder is noise in the list; the root itself stays
+    parent = path.parent
+    if parent != _logs_root().resolve() and parse_day(parent.name):
+        try:
+            parent.rmdir()
+        except OSError:
+            pass
     return {"ok": True}
 
 
-@app.get("/api/logs/{name}/data")
+@app.get("/api/logs/{name:path}/data")
 async def log_data(name: str):
     """Decoded CSV text for charting (unzips a .csv.zip). Rejects raw logs."""
-    cfg = cm.load()
-    log_dir = Path(cfg["log_dir"])
     try:
-        name = _safe_name(name)
+        name = _safe_rel(name)
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
-    path = log_dir / name
-    if not path.is_file():
+    path = _log_file(name)
+    if path is None:
         return JSONResponse(status_code=404, content={"error": "не найдено"})
-    if _log_kind(name) != "decoded":
+    if _log_kind(Path(name).name) != "decoded":
         return JSONResponse(status_code=400, content={"error": "not_decoded"})
     try:
         if name.endswith(".zip"):

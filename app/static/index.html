@@ -473,14 +473,35 @@
             <span data-i18n="cfg.diag">Board diagnostics log</span></label>
           <label><span data-i18n="cfg.diagMax">Diagnostics file limit, MB</span>
             <input name="diag.max_mb" type="number" min="0.05" max="64" step="0.5" /></label>
-          <div class="fw-logs">
-            <div class="card__head"><span data-i18n="cfg.fwLogs">Firmware operation logs</span>
-              <button type="button" id="fwLogsRefresh" class="mini" data-i18n="cfg.fwLogsRefresh">refresh</button>
+          <p class="hint" data-i18n="cfg.diagHint">Records USB, Wi-Fi and K-Line events next to the ride logs: what the kernel says about the adapter, when the link came up or died, and a board snapshot every few seconds. On reaching the limit the file is archived to .zip and a new one starts. The files are listed right below; /api/diag.txt opens the current one as plain text.</p>
+          <div class="board-logs">
+            <div class="card__head"><span data-i18n="cfg.boardLogs">Board logs</span>
+              <button type="button" id="boardLogsRefresh" class="mini" data-i18n="logs.refresh">refresh</button>
             </div>
-            <div id="fwLogsList" class="filelist"></div>
-            <p class="hint" data-i18n="cfg.fwLogsHint">One file per firmware read or write: the util's full output, the adapter's USB facts, the kernel's messages during the transfer and the reason it failed. Kept here rather than among the ride logs.</p>
+            <div class="toolbar">
+              <div class="seg" id="boardLogFilter">
+                <button data-f="all" class="on" data-i18n="logs.all">Show all</button>
+                <button data-f="diag" data-i18n="cfg.kindDiag">Debug</button>
+                <button data-f="fw" data-i18n="cfg.kindFw">Firmware</button>
+              </div>
+              <label class="inline grow" style="margin:0;font-size:13px;justify-content:flex-end">
+                <input type="checkbox" id="boardLogZip" style="width:18px;height:18px" />
+                <span data-i18n="cfg.boardZip">Auto-zip finished board logs</span>
+              </label>
+            </div>
+            <div class="fw-tools">
+              <button type="button" id="boardLogsDownloadBtn" class="mini" data-i18n="logs.download">Download</button>
+              <button type="button" id="boardLogsDeleteBtn" class="mini mini--danger" data-i18n="logs.delete">Delete</button>
+            </div>
+            <div class="fwrow fwrow--head" id="boardLogSort">
+              <span></span>
+              <button data-s="name" class="col-name"><span data-i18n="logs.name">Name</span><span class="arrow"></span></button>
+              <button data-s="mtime" class="on col-date"><span data-i18n="logs.date">Date</span><span class="arrow">▼</span></button>
+              <button data-s="size" class="col-size"><span data-i18n="logs.size">Size</span><span class="arrow"></span></button>
+            </div>
+            <div id="boardLogsList" class="logs filelist"></div>
+            <p class="hint" data-i18n="cfg.boardLogsHint">Two kinds live here, both written by the board rather than by a ride: the diagnostics log (deb) and one file per firmware read or write (fw). Opening a row shows it as text; a .zip is a download only.</p>
           </div>
-          <p class="hint" data-i18n="cfg.diagHint">Records USB, Wi-Fi and K-Line events next to the ride logs: what the kernel says about the adapter, when the link came up or died, and a board snapshot every few seconds. On reaching the limit the file is archived to .zip and a new one starts. Download it in Logs (diag-…) or open /api/diag.txt.</p>
           <p class="hint" data-i18n="cfg.autoTimeHint">The board has no battery-backed clock. With this on, the first browser that opens the UI after a power-up sets the date, time and timezone — once per power-up, and only if the two clocks differ by more than 2 s.</p>
           <div class="time-row">
             <div class="time-info">
@@ -513,6 +534,14 @@
           </label>
         </fieldset>
 
+        <fieldset class="card">
+          <legend data-i18n="storage.title">Log storage</legend>
+          <div id="storeNow" class="hint">—</div>
+          <div id="storeList" class="filelist"></div>
+          <div id="storeFree" class="diskfree"></div>
+          <p class="hint" data-i18n="storage.hint">Logs are written into a folder per day. Pick a USB drive and they go to it instead of the board's card; if it is not plugged in when recording starts, the board falls back to internal memory so a ride is never lost.</p>
+        </fieldset>
+
         <p id="cfgNetDirty" class="hint cfg-dirty" hidden data-i18n="cfg.netDirty">Network settings changed — press “Save &amp; apply” to send them (the AP restarts, you may need to reconnect).</p>
         <button type="submit" class="btn btn--primary" data-i18n="cfg.save">Save &amp; apply</button>
       </form>
@@ -539,7 +568,7 @@
     <!-- ============ LOGS ============ -->
     <section id="tab-logs" class="tabpanel" role="tabpanel">
       <div class="card">
-        <div class="card__head"><span data-i18n="logs.title">K-Line logs</span><button id="logsRefresh" class="mini" data-i18n="logs.refresh">refresh</button></div>
+        <div class="card__head"><span data-i18n="logs.title">Log files</span><button id="logsRefresh" class="mini" data-i18n="logs.refresh">refresh</button></div>
         <div class="toolbar">
           <div class="seg" id="logFilter">
             <button data-f="all" class="on" data-i18n="logs.all">Show all</button>
@@ -562,6 +591,7 @@
           <button data-s="size" class="col-size"><span data-i18n="logs.size">Size</span><span class="arrow"></span></button>
         </div>
         <div id="logsList" class="logs filelist"></div>
+        <div id="logsDest" class="hint"></div>
         <div id="logsFree" class="diskfree"></div>
       </div>
 

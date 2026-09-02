@@ -457,12 +457,13 @@ label.is-dirty input, label.is-dirty select { border-color: var(--warn); }
 .logrow > .fwsel { width: 20px; height: 20px; accent-color: var(--accent); flex: none; margin: 0; }
 .fw-file__meta { display: flex; align-items: center; gap: 10px; flex: none; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 /* firmware operation logs, listed in Config -> System (never in the Logs tab) */
-.fw-logs { margin: 12px 0 4px; }
-.fw-logs .card__head { margin-bottom: 4px; }
-.fw-logs .logrow { gap: 8px; }
-.fw-logs .logrow > a:first-child { flex: 1; min-width: 0; font-size: 13px; }
-.fw-logs .logrow .mini { min-height: 28px; padding: 0 10px; font-size: 12px; flex: none; }
-.fw-logs .lmeta { flex: none; }
+.board-logs { margin: 12px 0 4px; }
+.board-logs .card__head { margin-bottom: 4px; }
+.board-logs .logrow { gap: 8px; }
+.board-logs .logrow > :first-child { flex: 1; min-width: 0; font-size: 13px; }
+.board-logs .lname { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.board-logs .logrow .mini { min-height: 28px; padding: 0 10px; font-size: 12px; flex: none; }
+.board-logs .lmeta { flex: none; }
 
 .icon-del {
   width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
@@ -522,6 +523,16 @@ label.is-dirty input, label.is-dirty select { border-color: var(--warn); }
 .fwrow .fwsel { width: 20px; height: 20px; accent-color: var(--accent); margin: 0; }
 .fwrow .col-date, .fwrow .col-size { text-align: right; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fwrow .col-size.bad { color: var(--danger); font-weight: 700; }
+/* storage and system-log rows carry buttons instead of a checkbox, so they get
+   their own track list rather than borrowing the file list's 22px first column */
+.fwrow.storerow { grid-template-columns: minmax(0, 1fr) auto auto auto; }
+.fwrow.storerow .col-date, .fwrow.storerow .col-size { min-width: 0; }
+.fwrow.storerow .mini { white-space: nowrap; }
+.storefiles-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin: 14px 0 2px; font-weight: 600; font-size: 13px;
+}
+.hint.warn { color: var(--warn); font-weight: 600; }
 
 /* the image's own calibration id, under the file name — a fifth grid column
    would crush the 360 px phone layout */

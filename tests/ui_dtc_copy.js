@@ -1,122 +1,15 @@
 "use strict";
 // Headless harness for the Fault-codes "Copy" button.
 //
-// app/static/app.js is a plain script with no exports, so it is evaluated whole
-// inside a vm context on a minimal DOM stub: its top-level `function`
-// declarations land on that context's global and can be called from here.
-// (`let`/`const` at the top level do not — hence the assertions go through
+// The DOM stub lives in tests/ui_sandbox.js; assertions here go through
 // setDtcCopy()/renderDtc() and the button's own click handler, never through
-// the module-private dtcCopyText.)
+// the module-private dtcCopyText, because top-level `let`/`const` in app.js do
+// not land on the vm global.
 //
 // Run directly: node tests/ui_dtc_copy.js   (also driven by test_ui_dtc_copy.py)
 
-const fs = require("fs");
-const path = require("path");
-const vm = require("vm");
+const { makeSandbox, read } = require("./ui_sandbox.js");
 
-const ROOT = path.resolve(__dirname, "..");
-const read = (p) => fs.readFileSync(path.join(ROOT, p), "utf8");
-
-process.on("unhandledRejection", () => {});   // init()'s fetches have nowhere to go here
-
-// ---------- DOM stub ----------
-function makeSandbox() {
-  const created = [];
-
-  function el(tag = "div") {
-    const node = {
-      tagName: tag,
-      children: [],
-      parentNode: null,
-      handlers: {},
-      dataset: {},
-      style: {},
-      attrs: {},
-      value: "",
-      textContent: "",
-      innerHTML: "",
-      hidden: false,
-      disabled: false,
-      classList: {
-        _s: new Set(),
-        add(...c) { c.forEach((x) => this._s.add(x)); },
-        remove(...c) { c.forEach((x) => this._s.delete(x)); },
-        toggle(c, on) {
-          const want = on === undefined ? !this._s.has(c) : !!on;
-          if (want) this._s.add(c); else this._s.delete(c);
-        },
-        contains(c) { return this._s.has(c); },
-      },
-      addEventListener(type, fn) { (this.handlers[type] ||= []).push(fn); },
-      removeEventListener() {},
-      setAttribute(k, v) { this.attrs[k] = v; },
-      getAttribute(k) { return this.attrs[k]; },
-      appendChild(c) { c.parentNode = this; this.children.push(c); return c; },
-      removeChild(c) { this.children = this.children.filter((x) => x !== c); },
-      remove() {
-        if (node.parentNode) node.parentNode.removeChild(node);
-        node.parentNode = null;
-        node.detached = true;
-      },
-      querySelector() { return el(); },
-      querySelectorAll() { return []; },
-      setSelectionRange(a, b) { node.selectedRange = [a, b]; },
-      focus() {}, blur() {}, click() {}, scrollIntoView() {}, requestSubmit() {},
-    };
-    created.push(node);
-    return node;
-  }
-
-  const bySel = new Map();
-  const document = {
-    documentElement: el("html"),
-    body: el("body"),
-    activeElement: null,
-    execCalls: [],
-    execResult: true,
-    querySelector(sel) {
-      if (!bySel.has(sel)) bySel.set(sel, el());
-      return bySel.get(sel);
-    },
-    querySelectorAll() { return []; },
-    createElement(tag) { return el(tag); },
-    createRange() { return { selectNodeContents() {} }; },
-    createTextNode(txt) { const n = el("#text"); n.textContent = txt; return n; },
-    execCommand(cmd) { document.execCalls.push(cmd); return document.execResult; },
-    addEventListener() {}, removeEventListener() {},
-  };
-
-  const sandbox = {
-    console,
-    document,
-    created,
-    isSecureContext: false,
-    navigator: {},                       // no clipboard by default: the board's http:// case
-    location: { protocol: "http:", host: "192.168.4.1" },
-    localStorage: {
-      s: {},
-      getItem(k) { return k in this.s ? this.s[k] : null; },
-      setItem(k, v) { this.s[k] = String(v); },
-      removeItem(k) { delete this.s[k]; },
-    },
-    // no real timers: app.js arms a 1 s ticker and toasts auto-dismiss, either of
-    // which would keep node alive long after the assertions are done
-    setTimeout: () => 0, clearTimeout: () => {},
-    setInterval: () => 0, clearInterval: () => {},
-    requestAnimationFrame: () => 0,
-    fetch: () => Promise.reject(new Error("offline")),
-    WebSocket: function WebSocket() { return { close() {}, send() {} }; },
-    getSelection: () => ({ removeAllRanges() {}, addRange() {} }),
-    matchMedia: () => ({ matches: false, addEventListener() {}, addListener() {} }),
-    URL: { createObjectURL: () => "blob:x", revokeObjectURL() {} },
-  };
-  sandbox.window = sandbox;
-  sandbox.self = sandbox;
-  vm.createContext(sandbox);
-  vm.runInContext(read("app/static/i18n.js"), sandbox, { filename: "i18n.js" });
-  vm.runInContext(read("app/static/app.js"), sandbox, { filename: "app.js" });
-  return sandbox;
-}
 
 // ---------- tiny test runner ----------
 let failed = 0;
