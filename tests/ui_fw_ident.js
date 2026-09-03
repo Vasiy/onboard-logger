@@ -117,7 +117,8 @@ async function loadWith(sb, payload, extraRoutes = {}) {
     "/api/firmware/check": {level: "ok", reason: "", image: {}, ecu: {}},
     "/api/firmware/catalog": {entries: []},
     "/api/firmware": Object.assign({
-      op: "idle", result: "", progress: "", current: "", log: [], available: true,
+      op: "idle", last_op: "", result: "", progress: "", current: "", log: [],
+      prog: {percent: -1, done: 0, total: 0}, available: true,
       required_size: 327680, files: [], suggest: null, guard_override: false,
     }, payload),
   }, extraRoutes));
@@ -142,6 +143,61 @@ test("the file list shows the code the image claims for itself", async () => {
   has(html, "granpasso_v4_draft.bin");
   has(html, "23ECCLGPSMC");
   has(html, "Moto Morini Granpasso 1200");
+});
+
+// ---------- the read/write progress bar ----------
+const bar = (sb, which) => ({
+  box: $(sb, "#fw" + which + "Prog"),
+  fill: $(sb, "#fw" + which + "Fill"),
+  val: $(sb, "#fw" + which + "Val"),
+  track: $(sb, "#fw" + which + "Track"),
+});
+
+test("only the bar of the running operation is on screen", async () => {
+  const sb = makeSandbox();
+  await loadWith(sb, {op: "reading", current: "dump.bin",
+                      prog: {percent: 25.0, done: 65536, total: 262144}});
+  assert(bar(sb, "Read").box.hidden === false, "the read bar should be visible");
+  assert(bar(sb, "Write").box.hidden === true, "the write bar has nothing to show");
+  assert(bar(sb, "Read").fill.style.width === "25%", bar(sb, "Read").fill.style.width);
+  has(bar(sb, "Read").val.textContent, "25.0 %");
+  has(bar(sb, "Read").val.textContent, "64.0 KB / 256.0 KB");
+  assert(bar(sb, "Read").track.getAttribute("aria-valuenow") === "25");
+});
+
+test("a write draws under its own button", async () => {
+  const sb = makeSandbox();
+  await loadWith(sb, {op: "writing", current: "img.bin",
+                      prog: {percent: 50.0, done: 155652, total: 311304}});
+  assert(bar(sb, "Write").box.hidden === false, "the write bar should be visible");
+  assert(bar(sb, "Read").box.hidden === true, "the read bar has nothing to show");
+  has(bar(sb, "Write").val.textContent, "50.0 %");
+});
+
+test("a finished operation keeps its bar until the next one starts", async () => {
+  // the board says op:idle the moment the util exits, so `last_op` is what tells
+  // the two bars apart once the result is in
+  const sb = makeSandbox();
+  await loadWith(sb, {op: "idle", last_op: "reading", result: "ok",
+                      prog: {percent: 100.0, done: 262144, total: 262144}});
+  assert(bar(sb, "Read").box.hidden === false, "a finished read must still show 100 %");
+  has(bar(sb, "Read").val.textContent, "100.0 %");
+  await loadWith(sb, {op: "idle", last_op: "reading", result: "", prog: {percent: -1}});
+  assert(bar(sb, "Read").box.hidden === true, "a cleared result clears the bar");
+});
+
+test("a failure keeps the number it died at", async () => {
+  const sb = makeSandbox();
+  await loadWith(sb, {op: "idle", last_op: "writing", result: "error",
+                      prog: {percent: 43.2, done: 134500, total: 311304}});
+  assert(bar(sb, "Write").box.hidden === false);
+  has(bar(sb, "Write").val.textContent, "43.2 %");
+});
+
+test("an operation that never reported a position draws no bar", async () => {
+  const sb = makeSandbox();
+  await loadWith(sb, {op: "reading", result: "", prog: {percent: -1, done: 0, total: 0}});
+  assert(bar(sb, "Read").box.hidden === true, "-1 means the util has said nothing yet");
 });
 
 test("a sidecar that contradicts the image is badged", async () => {

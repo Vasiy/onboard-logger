@@ -41,6 +41,20 @@ CONTEXT.md
 
 # decompiles of third-party tools — reference material, kept outside the repo
 *.exe.txt
+# ... and their localisation files, which carry the owner's own paths and settings
+GuzziDiag*.ini
+IAWDiag*.ini
+JPDiag*.ini
+
+# captured ride logs, scans and ECU dumps pulled off the board for analysis
+old_logs/
+
+# Internal working notes — the private archive keeps them tracked (a .gitignore
+# entry never untracks a file that is already in the index), while the public
+# mirror drops them: the content sync copies this file too, so once they were
+# `git rm --cached`ed there they stay untracked on every later sync.
+/CLAUDE.md
+/HANDOFF.md
 
 # nested worktrees Claude Code creates here — a checkout inside a checkout
 .claude/worktrees/

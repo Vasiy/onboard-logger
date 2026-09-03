@@ -1763,6 +1763,7 @@ async function loadFirmware() {
   fwRequiredSize = d.required_size || 0;
   $("#fwOverrideActive").hidden = !d.guard_override;
   renderFwSuggest(d.suggest);
+  renderFwProgress(d);
   $("#fwReadBtn").disabled = busy || !d.available;
 
   fwFiles = d.files || [];
@@ -1774,6 +1775,30 @@ async function loadFirmware() {
   renderFwFiles();
   loadWriteDesc();
   checkWriteGuard();
+}
+
+// The bar belongs to the button that started the operation, and outlives it: the
+// board reports `op: idle` the moment the util exits, so a finished read has to
+// keep showing its 100 % (and a failed one the number it died at) until the next
+// operation begins. `last_op` is what says which of the two bars that was.
+function renderFwProgress(d) {
+  const op = d.op && d.op !== "idle" ? d.op : (d.result ? d.last_op || "" : "");
+  // `prog` is nested because /api/firmware also carries the disk free/total
+  const p = d.prog || {};
+  const pct = typeof p.percent === "number" ? p.percent : -1;
+  fwBar("Read", op === "reading" && pct >= 0, pct, p);
+  fwBar("Write", op === "writing" && pct >= 0, pct, p);
+}
+
+function fwBar(which, on, pct, p) {
+  $("#fw" + which + "Prog").hidden = !on;
+  if (!on) return;
+  $("#fw" + which + "Fill").style.width = pct + "%";
+  const size = p.total ? ` · ${fmtSize(p.done)} / ${fmtSize(p.total)}` : "";
+  $("#fw" + which + "Val").textContent = `${pct.toFixed(1)} %${size}`;
+  const track = $("#fw" + which + "Track");
+  track.setAttribute("aria-valuenow", String(Math.round(pct)));
+  track.setAttribute("aria-label", t("fw.progress"));
 }
 
 // Refuse to flash anything but an exact-size image (mismatched size bricks the ECU),

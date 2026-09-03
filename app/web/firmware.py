@@ -41,6 +41,21 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 # result — its own error lines and the size of what came out do.
 UTIL_ERR_RE = re.compile(r"\[!\]|\berror\b|\bfailed\b|timeout", re.I)
 
+# Both operations say exactly where they are, behind a \r spinner, so the UI bar
+# is read out of the util instead of guessed from elapsed time:
+#   write  "[|] Writing 155652 of 311304"        (main.c:374)
+#   read   "[|] Block: 6\tOffset: 0x1fe0"        (main.c:586)
+PROG_WRITE_RE = re.compile(r"Writing\s+(\d+)\s+of\s+(\d+)")
+PROG_READ_RE = re.compile(r"Block:\s*(\d+)\s+Offset:\s*0x([0-9a-fA-F]+)")
+READ_BLOCK = 0x4000       # a block is 16 KiB, requested in 0x20-byte chunks
+READ_CHUNK = 0x20
+# The dump is 20 blocks, but 2..5 never go on the wire: the util fills them from
+# a local blob between two frames (main.c:559). Scaling by file position would
+# jump the bar 10 % -> 40 % in an instant, so the 16 blocks that are actually
+# read are the whole scale — that keeps it linear in time, which is what a
+# 20-minute read needs it to be.
+READ_BLOCKS = 16
+
 
 class FirmwareBlocked(RuntimeError):
     """A write the guard refused. Carries the verdict so the UI can explain it."""
@@ -83,8 +98,12 @@ class FirmwareManager:
         self._pending_note = ""  # one log line to emit when the next op starts
         self._lock = threading.Lock()
         self.op = "idle"        # idle | reading | writing
+        self.last_op = ""       # the op `result` belongs to: op is idle by then
         self.result = ""        # "" | ok | error | cancelled
         self.progress = ""
+        self.percent = -1.0     # -1 = the util has not said where it is yet
+        self.done = 0           # bytes transferred / total, for the label
+        self.total = 0
         self.log: list[str] = []
         self.current = ""
         self._proc: subprocess.Popen | None = None
@@ -98,8 +117,13 @@ class FirmwareManager:
         with self._lock:
             return {
                 "op": self.op,
+                "last_op": self.last_op,
                 "result": self.result,
                 "progress": self.progress,
+                # nested on purpose: /api/firmware merges this dict with
+                # _disk_free(), whose own "total" silently ate a flat one
+                "prog": {"percent": self.percent, "done": self.done,
+                         "total": self.total},
                 "current": self.current,
                 "log": self.log[-50:],
                 "available": self.available(),
@@ -139,9 +163,10 @@ class FirmwareManager:
                 raise RuntimeError("busy")
             if not self.available():
                 raise RuntimeError("5am_util не установлен")
-            self.op = op
+            self.op = self.last_op = op
             self.result = ""
             self.progress = ""
+            self.percent, self.done, self.total = -1.0, 0, 0
             self.log = []
             self.current = name
             self._ui_verbose = bool(ui_verbose)
@@ -160,6 +185,37 @@ class FirmwareManager:
             if len(self.log) > 500:
                 self.log = self.log[-500:]
             self.progress = line
+
+    def _progress(self, line: str) -> bool:
+        """Update the bar from one util line. True when the line *was* the bar,
+        so the caller can keep the spinner out of the UI list."""
+        m = PROG_WRITE_RE.search(line)
+        if m:
+            done, total = int(m.group(1)), int(m.group(2))
+        else:
+            m = PROG_READ_RE.search(line)
+            if not m:
+                return False
+            block, off = int(m.group(1)), int(m.group(2), 16)
+            if 2 <= block <= 5:       # never printed, but do not skew the scale
+                return True
+            ordinal = block if block < 2 else block - 4
+            total = READ_BLOCKS * READ_BLOCK
+            done = ordinal * READ_BLOCK + off + READ_CHUNK
+        if total <= 0:
+            return True
+        done = max(0, min(done, total))
+        with self._lock:
+            self.done, self.total = done, total
+            self.percent = round(done * 100.0 / total, 1)
+        return True
+
+    def _fill_bar(self) -> None:
+        """An operation the util called done is 100 %, whatever its last line
+        said — the writer stops printing before the final chunk goes out."""
+        with self._lock:
+            if self.total > 0:
+                self.done, self.percent = self.total, 100.0
 
     # -- verbose per-operation log ----------------------------------------
     UI_KEEP = ("[", "err", "fail", "timeout", "invalid", "abort", "%")
@@ -375,9 +431,12 @@ class FirmwareManager:
                     self._v("UTIL", p)
                     if not self._util_err and UTIL_ERR_RE.search(p):
                         self._util_err = p
+                    # the bar draws these now, so they no longer flood the list
+                    prog = self._progress(p)
                     # -v is always on now, so an unchecked box shows milestones
                     # and anything that smells like a failure, not every byte
-                    if self._ui_verbose or any(w in p.lower() for w in self.UI_KEEP):
+                    if self._ui_verbose or (
+                            not prog and any(w in p.lower() for w in self.UI_KEEP)):
                         self._append(p)
             rc = self._proc.wait()
             self._v("FW", "exit rc=%d elapsed=%.1fs" % (rc, time.monotonic() - started))
@@ -391,6 +450,7 @@ class FirmwareManager:
                 if not confirm:  # a read -> save the GuzziDiag-style description
                     self._write_desc(self.current)
                     self.last_read = self.current
+                self._fill_bar()
                 self._finish("ok", "готово")
         except Exception as exc:  # noqa: BLE001 - surface any failure to the UI
             self._v("FW", "exception %s: %s" % (type(exc).__name__, exc))

@@ -315,6 +315,105 @@ def test_operation_log_has_a_size_cap():
         assert "truncated" in (logs / "cap.log").read_text()
 
 
+# -- progress bar ------------------------------------------------------------
+# 5am_util prints its own position on stdout behind a \r spinner, and both shapes
+# are exact (main.c:374 writing, main.c:586 reading), so the bar is parsed out of
+# the util rather than estimated from elapsed time.
+
+def _pm(op):
+    fm = FirmwareManager(lambda: None, "/usr/bin/true", "/tmp", "/dev/kline", State())
+    fm.op = op
+    return fm
+
+
+def test_write_progress_is_the_utils_own_counter():
+    fm = _pm("writing")
+    assert fm._progress("[|] Writing 155652 of 311304") is True
+    s = fm.status()
+    assert (s["prog"]["done"], s["prog"]["total"]) == (155652, 311304)
+    assert abs(s["prog"]["percent"] - 50.0) < 0.01
+
+
+def test_read_progress_skips_the_blocks_never_asked_for():
+    """Blocks 2-5 never go on the wire -- the util fills them from a local blob
+    in no time -- so counting them by file position would jump the bar from
+    10 % to 40 % in one step. Only the 16 requested blocks make up the scale."""
+    fm = _pm("reading")
+    assert fm._progress("[|] Block: 0\tOffset: 0x0") is True
+    assert fm.status()["prog"]["done"] == 0x20            # one 32-byte chunk is in
+    fm._progress("[/] Block: 1\tOffset: 0x3fe0")
+    assert fm.status()["prog"]["done"] == 0x8000          # two blocks -> 12.5 %
+    fm._progress("[-] Block: 6\tOffset: 0x0")     # the jump over 2..5
+    assert fm.status()["prog"]["done"] == 0x8000 + 0x20, "block 6 continues where 1 ended"
+    fm._progress("[\\] Block: 19\tOffset: 0x7fe0")
+    s = fm.status()
+    assert s["prog"]["done"] == s["prog"]["total"] == 16 * 0x4000
+    assert s["prog"]["percent"] == 100.0
+
+
+def test_the_bar_is_nested_so_the_disk_stats_cannot_eat_it():
+    """/api/firmware merges status() with _disk_free(), and that dict carries a
+    "total" of its own — the filesystem size. Flat bar fields were silently
+    replaced by 13 GB on the board, which is how this was found."""
+    from app.main import _disk_free
+    fm = _pm("reading")
+    fm._progress("[|] Block: 0\tOffset: 0x0")
+    merged = {**fm.status(), **_disk_free(Path("/"))}
+    assert merged["prog"]["total"] == 16 * 0x4000
+    assert set(fm.status()) & set(_disk_free(Path("/"))) == set(), "keys must not overlap"
+
+
+def test_a_line_that_is_not_progress_leaves_the_bar_alone():
+    fm = _pm("reading")
+    assert fm._progress("[+] Login successful") is False
+    assert fm.status()["prog"]["percent"] == -1           # -1: nothing to draw yet
+
+
+PROG_BODY = 'printf "[|] Block: 0\\tOffset: 0x0\\n"; printf "x" > "$2"'
+
+
+def test_progress_lines_stay_out_of_the_ui_log():
+    with tempfile.TemporaryDirectory() as tmp:
+        fm, logs = _run_util(tmp, PROG_BODY)
+        assert fm.status()["prog"]["total"] == 16 * 0x4000, "the bar read the util's line"
+        assert not any("Block:" in ln for ln in fm.status()["log"]), \
+            "the bar replaces the spinner spam"
+        text = next(logs.rglob("fw-reading-*.log")).read_text()
+        assert "Block:" in text, "the operation file still keeps every util line"
+
+
+def test_the_verbose_box_still_shows_them():
+    with tempfile.TemporaryDirectory() as tmp:
+        fm, _logs = _run_util(tmp, PROG_BODY, verbose=True)
+        assert any("Block:" in ln for ln in fm.status()["log"])
+
+
+def test_a_finished_operation_reads_full():
+    with tempfile.TemporaryDirectory() as tmp:
+        fm, _logs = _run_util(tmp, 'printf "[|] Writing 10 of 311304\\n"; printf "x" > "$2"',
+                              op="write")
+        assert fm.status()["result"] == "ok"
+        assert fm.status()["prog"]["percent"] == 100.0
+
+
+def test_a_failed_operation_keeps_the_bar_where_it_stopped():
+    """The number the rider saw when it broke is the useful one."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fm, _logs = _run_util(
+            tmp, 'printf "[|] Writing 155652 of 311304\\n"; echo "ERROR: ioctl"; '
+                 'printf "x" > "$2"', op="write")
+        assert fm.status()["result"] == "error"
+        assert abs(fm.status()["prog"]["percent"] - 50.0) < 0.01
+
+
+def test_an_operation_that_printed_nothing_has_no_bar():
+    """A util that dies before its first chunk must not leave a bar at 100 %."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fm, _logs = _run_util(tmp, 'echo "ERROR: ioctl: Bad file descriptor"')
+        assert fm.status()["result"] == "error"
+        assert fm.status()["prog"]["percent"] == -1
+
+
 def _main():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

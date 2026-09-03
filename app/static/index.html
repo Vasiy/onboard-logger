@@ -162,6 +162,10 @@
           <pre id="fwEcuInfo" class="fw-ecu-desc">—</pre>
         </div>
         <button id="fwReadBtn" class="btn btn--info" data-i18n="fw.read">Read from ECU</button>
+        <div id="fwReadProg" class="fw-prog" hidden>
+          <div id="fwReadTrack" class="fw-prog-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"><div id="fwReadFill" class="fw-prog-fill"></div></div>
+          <div id="fwReadVal" class="fw-prog-val">—</div>
+        </div>
         <div id="fwSuggest" class="fw-suggest" hidden>
           <div class="hint" data-i18n="fw.suggestHint">The image identifies itself as another calibration. Rename it?</div>
           <input id="fwSuggestName" type="text" />
@@ -183,6 +187,10 @@
         <div id="fwGuard" class="banner" style="margin:10px 0 0" hidden></div>
         <div id="fwSizeWarn" class="banner err" style="margin:10px 0 0" hidden></div>
         <button id="fwWriteBtn" class="btn btn--danger" data-i18n="fw.write">Write to ECU</button>
+        <div id="fwWriteProg" class="fw-prog" hidden>
+          <div id="fwWriteTrack" class="fw-prog-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"><div id="fwWriteFill" class="fw-prog-fill"></div></div>
+          <div id="fwWriteVal" class="fw-prog-val">—</div>
+        </div>
       </div>
 
       <div class="card">

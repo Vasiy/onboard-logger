@@ -543,6 +543,16 @@ label.is-dirty input, label.is-dirty select { border-color: var(--warn); }
 .fw-ident--none { opacity: .55; }
 .fw-badge { color: var(--danger); font-weight: 700; margin-left: 4px; }
 
+/* Read/write progress: same meter as the TPS one, but the full width of the
+   button above it — a 20-minute read needs the bar to be the thing you see. */
+.fw-prog { margin-top: 10px; display: flex; flex-direction: column; gap: 5px; }
+.fw-prog-track { width: 100%; height: 10px; border-radius: 999px; overflow: hidden;
+  background: var(--surface-3); border: 1px solid var(--border); }
+.fw-prog-fill { height: 100%; width: 0; border-radius: 999px; background: var(--accent);
+  transition: width .3s linear; }   /* the poll is 1.5 s, so ease between samples */
+.fw-prog-val { font-size: 12.5px; font-weight: 600; font-family: ui-monospace, monospace;
+  color: var(--fg); text-align: center; line-height: 1; }
+
 .fw-suggest { margin-top: 12px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
 .fw-suggest input { width: 100%; margin: 6px 0 8px; }
 
