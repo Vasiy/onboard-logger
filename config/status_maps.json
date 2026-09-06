@@ -1,0 +1,44 @@
+{
+  "_comment": "IAW status/bitfield decoders. 'enum' = value maps to one label; 'bits' = value is a bitmask, list every set flag. 'base' = radix of the keys. Attach to a param in params.json via {\"map\":\"<name>\",\"map_type\":\"enum|bits\"} once the status-carrying rli is identified; the raw value is still logged.",
+  "maps": {
+    "motorstate": {
+      "_note": "0x58 read against 0x30/0x34/0x33 on 2026-09-05 (326 samples): only 0, 5, 6 and 7 ever appeared. 0x04 stands for as long as the engine turns and is the only bit left when it stops. 0x01 follows the throttle a sample ahead of 0x34 -- set while it sits at 1.7-2.0 deg, clear the moment it opens past 4.8 -- so it is the closed-throttle/idle condition, not a power state. 0x02 came up once as the coolant crossed 53->54 C and never cleared again, which reads as the after-start/warm-up phase ending. The three high bits were never observed here, so their meaning is still a guess and they are labelled as such. The old labels (0x01 'Power-On, engine OFF', 0x02 'Ignition ON, engine OFF') contradicted the data -- they were set with the engine running.",
+      "type": "bits", "base": 16,
+      "values": {"01": "Closed throttle (idle)", "02": "Warm-up done", "04": "Engine running", "08": "bit 0x08 (never observed)", "10": "bit 0x10 (never observed)", "20": "bit 0x20 (never observed)"}
+    },
+    "motor": {
+      "type": "bits", "base": 16,
+      "values": {"2000": "Exit cut-off (accel)", "1000": "Exit cut-off (steady)", "0800": "Exit cut-off", "0400": "In cut-off", "0200": "Entry to cut-off", "0100": "Running (decel)", "0080": "Running (accel)", "0040": "Steady running", "0020": "Running at min rpm", "0010": "Min rpm at crank", "0008": "Accel at crank", "0004": "Decel at crank", "0002": "Steady at crank", "0001": "Crank"}
+    },
+    "sidestand": {
+      "type": "enum", "base": 16,
+      "values": {"00": "Up", "01": "Down"}
+    },
+    "clutch": {
+      "_note": "polarity verified on the bike 2026-09-04: the ECU answers 0 while the lever is pulled (the engine was started that way) and 1 with it released -- the reference table had it the other way round",
+      "type": "enum", "base": 16,
+      "values": {"00": "Pulled (disengaged)", "01": "Released (engaged)"}
+    },
+    "tps_state": {
+      "type": "bits", "base": 16,
+      "values": {"01": "TPS at minimum", "02": "TPS full open", "04": "TPS at middle"}
+    },
+    "neutral": {
+      "type": "enum", "base": 16,
+      "values": {"00": "Neutral", "01": "Engaged"}
+    },
+    "lambda_loop": {
+      "_note": "0x49 on the 2026-09-04 warm-up: a flat 0 for the first 43 s from cold, then 0<->2 at the rate the sensor itself switches -- 2 is the closed-loop correction being applied",
+      "type": "enum", "base": 16,
+      "values": {"00": "Open loop", "02": "Closed loop"}
+    },
+    "onoff": {
+      "type": "enum", "base": 16,
+      "values": {"00": "OFF", "01": "ON"}
+    },
+    "immobilizer": {
+      "type": "enum", "base": 10,
+      "values": {"0": "ECU stored", "1": "ECU virgin", "2": "ECU doesn't allow start", "3": "Universal code received", "4": "not used", "5": "Backdoor code received", "6": "Erroneous key (10*6)", "7": "Code unknown", "8": "No code received"}
+    }
+  }
+}

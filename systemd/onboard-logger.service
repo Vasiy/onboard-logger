@@ -1,0 +1,16 @@
+[Unit]
+Description=Onboard Logger — K-Line logger + Wi-Fi AP web UI
+After=network.target NetworkManager.service
+Wants=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/onboard-logger
+ExecStart=/opt/onboard-logger/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 80
+Restart=always
+RestartSec=3
+# root required: bind :80, sysfs LED, hostapd/dnsmasq/ip/hostnamectl, reboot/poweroff
+User=root
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+{
+  "_comment": "Where the calibration identity lives INSIDE a firmware image. Offsets come from the TunerPro XDF for the IAW 5AM family (5AM_Morini_23ECCLGPS_merged.xdf) and were verified against five images: 23ECCLGPSMB/MC/MD.bin, my_original_fw.bin and granpasso_v4_draft.bin. map1+map2 concatenated give the calibration code (23EC + CLGPSMD). The XDF also names Software Date (0x47F82) and Software Version (0x47F96), but on every image we have they hold filler and pick up the marker bytes as text, so they are deliberately not declared here. A different ECU family gets its own entry, no Python change.",
+  "layouts": [
+    {
+      "id": "iaw5am",
+      "size": 327680,
+      "marker": {"offset": "0x47FA0", "hex": "55AA33CC"},
+      "window": {"offset": "0x47FA0", "length": 136},
+      "fields": [
+        {"key": "map1",     "offset": "0x47FA4", "length": 12, "pad": "space"},
+        {"key": "map2",     "offset": "0x48006", "length": 16, "pad": "space"},
+        {"key": "hardware", "offset": "0x48016", "length": 16, "pad": "nul"}
+      ],
+      "code": {"join": ["map1", "map2"], "sep": ""}
+    }
+  ]
+}

@@ -1,0 +1,3251 @@
+{
+  "_comment": "Calibration code -> bike. `code` is a prefix (the family); whatever follows it in a full code is the revision, so one entry covers 23ECCLGPSMB/MC/MD and `revisions` names the ones we know. Longest matching prefix wins; \"match\":\"exact\" beats any prefix. `space` says which identity the code belongs to: \"image\" = the calibration code inside a firmware file, \"live\" = the Drawing field of the 0x1A 0x80 response, \"both\" = we do not know which. They are NOT interchangeable — a Ducati answers 96520610B live while its image holds a calibration mnemonic. Keep `model` identical for entries describing the same bike: the write guard compares brand+model, so splitting one bike across two model strings would hard-block a legitimate flash. Anything not read off a real ECU or image here carries \"verified\": false. Entries added from the UI land in /etc/onboard-logger/fw_catalog.json as an overlay and carry \"user\": true; this file stays the seed and keeps growing with updates. Entries with \"guard\": false are reference only: they name a bike in the UI but never resolve a side for the write guard, because their model text comes from a free-form tune list where one motorcycle appears under several names.",
+  "version": 1,
+  "entries": [
+    {
+      "code": "23ECCLGPSM",
+      "match": "prefix",
+      "space": "image",
+      "brand": "Moto Morini",
+      "model": "Granpasso 1200",
+      "ecu": "IAW 5AM",
+      "hw": "IAW5AMHW610",
+      "verified": true,
+      "source": "read out of five images on this board (rev B/C/D)",
+      "note": "trailing character is the calibration revision",
+      "revisions": {
+        "C": "working base",
+        "D": "stock D — baseline"
+      }
+    },
+    {
+      "code": "23ECCLGPSM",
+      "match": "prefix",
+      "space": "live",
+      "brand": "Moto Morini",
+      "model": "Granpasso 1200",
+      "ecu": "IAW 5AM",
+      "hw": "IAW5AMHW610",
+      "verified": true,
+      "source": "Drawing field of this bike's ECU matches its image code",
+      "revisions": {
+        "C": "working base",
+        "D": "stock D — baseline"
+      }
+    },
+    {
+      "code": "23ACMCOR",
+      "match": "prefix",
+      "space": "image",
+      "brand": "Moto Morini",
+      "model": "Corsaro 1200",
+      "ecu": "IAW 5AM",
+      "verified": false,
+      "source": "TunerPro XDF 5AM_Morini_Corsaro_V1_25 (23ACMCORA); no image seen"
+    },
+    {
+      "code": "22ADBADLM",
+      "match": "prefix",
+      "space": "both",
+      "brand": "Ducati",
+      "model": "848",
+      "ecu": "IAW 5AM",
+      "verified": false,
+      "note": "stock ECU calibrations",
+      "revisions": {
+        "02": "UK stock",
+        "03": "stock",
+        "10": "stock (variant)",
+        "12": "stock (variant)",
+        "14": "stock (variant)"
+      }
+    },
+    {
+      "code": "22ADADPSMA",
+      "match": "prefix",
+      "space": "both",
+      "brand": "Ducati",
+      "model": "848",
+      "ecu": "IAW 5AM",
+      "verified": false,
+      "note": "DP slip-on ECU",
+      "revisions": {
+        "1": "DP slip-on"
+      }
+    },
+    {
+      "code": "96519508",
+      "match": "prefix",
+      "space": "live",
+      "brand": "Ducati",
+      "model": "848",
+      "ecu": "IAW 5AM",
+      "verified": false,
+      "note": "DP full-system ECU part number",
+      "revisions": {
+        "B": "DP full system"
+      }
+    },
+    {
+      "code": "28640761",
+      "match": "prefix",
+      "space": "live",
+      "brand": "Ducati",
+      "model": "Multistrada 1000DS",
+      "ecu": "IAW 5AM",
+      "verified": false,
+      "note": "stock ECU part number",
+      "revisions": {
+        "C": "stock"
+      }
+    },
+    {
+      "code": "96511803",
+      "match": "prefix",
+      "space": "live",
+      "brand": "Ducati",
+      "model": "Multistrada 1000DS",
+      "ecu": "IAW 5AM",
+      "verified": false,
+      "note": "DP ECU part number",
+      "revisions": {
+        "B": "DP"
+      }
+    },
+    {
+      "code": "28642091",
+      "match": "prefix",
+      "space": "live",
+      "brand": "Ducati",
+      "model": "",
+      "ecu": "IAW 5AM",
+      "verified": false,
+      "note": "file 3220MA14; the bike model is not stated",
+      "revisions": {
+        "A": "3220MA14"
+      }
+    },
+    {
+      "code": "2232B32LEP",
+      "match": "prefix",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "",
+      "ecu": "IAW 5AM",
+      "hw": "IAW5AMHW610",
+      "verified": false,
+      "note": "dated 03/04/2006; the bike model is not stated",
+      "revisions": {
+        "A": "03/04/2006"
+      }
+    },
+    {
+      "code": "0130DC27",
+      "match": "exact",
+      "space": "both",
+      "brand": "Ducati",
+      "model": "ST4S / 800SS / 1000SS",
+      "ecu": "IAW 59M",
+      "verified": false,
+      "note": "a 59M analysis starting point, not a confirmed calibration id; this logger targets the 5AM"
+    },
+    {
+      "code": "96520610",
+      "match": "prefix",
+      "space": "live",
+      "brand": "Ducati",
+      "model": "1098",
+      "ecu": "IAW 5AM",
+      "hw": "IAW5AMHW610",
+      "verified": false,
+      "source": "forum dump of a live 1A 80 block",
+      "revisions": {
+        "B": "stock"
+      }
+    },
+    {
+      "code": "28640921",
+      "match": "prefix",
+      "space": "live",
+      "brand": "Moto Guzzi",
+      "model": "",
+      "ecu": "IAW 5AM",
+      "hw": "IAW5AMHW103",
+      "verified": false,
+      "source": "forum dump of a live 1A 80 block; the bike model is not stated"
+    },
+    {
+      "code": "2333MOL1249",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Morini",
+      "model": "Corsaro 1200",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2333MORSK19",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Morini",
+      "model": "Corsaro 1200",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "23ABMOLSK22",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Morini",
+      "model": "Corsaro 1200",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "23ACMOL49C",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Morini",
+      "model": "Corsaro 1200",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "23ACMOL49D",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Morini",
+      "model": "Corsaro 1200 (UK)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "23ACMOLK22C",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Morini",
+      "model": "Corsaro 1200 Veloce",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "23ACMOLK22D",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Morini",
+      "model": "Corsaro 1200 Veloce Racing",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "23ACMOR95C",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Morini",
+      "model": "Corsaro 1200",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "23ACMORCORA",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Morini",
+      "model": "Corsaro 1200",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "23ECMOLCORC",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Morini",
+      "model": "Corsaro 1200",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2337MOR95OL",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Morini",
+      "model": "Morini 9 1/2",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "23ACMORCAVF",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Morini",
+      "model": "Corsaro Avio",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "23ACMORCAVG",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Morini",
+      "model": "Corsaro Avio",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "23EDMORSPTC",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Morini",
+      "model": "1200 Sport",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "23ACMORSPTA",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Morini",
+      "model": "1200 Sport",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2229BRV1249",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Guzzi",
+      "model": "Breva 1100",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2230BB10",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Guzzi",
+      "model": "Breva 1100 ABS",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2229BRVSP05",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Guzzi",
+      "model": "1200 Sport",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2230BA20",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Guzzi",
+      "model": "1200 Sport 8V",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2230BD01",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Guzzi",
+      "model": "1200 Sport / ABS",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2229BRV8205",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Guzzi",
+      "model": "1200 Sport 8V / ABS",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2229GRS8529",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Guzzi",
+      "model": "Griso 850",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2230GS08",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Guzzi",
+      "model": "Griso 1100",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2229GRS4V34",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Guzzi",
+      "model": "Griso 1100",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2229GRS8V68",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Guzzi",
+      "model": "Griso 1100",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2229GRS1102",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Guzzi",
+      "model": "Griso 1100",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2229GRS1103",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Guzzi",
+      "model": "Griso 1100",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2230G803",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Guzzi",
+      "model": "Griso 1100",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2229NGR1207",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Guzzi",
+      "model": "Norge 1200 ABS",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2230NG17",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Guzzi",
+      "model": "Norge 1200 ABS",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2230NG18",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Guzzi",
+      "model": "Norge 1200 ABS & 1200 Sport / ABS",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "3221NRG136",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Guzzi",
+      "model": "Norge 1200 8V ABS",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2229STA42ZA",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Guzzi",
+      "model": "Stelvio 1200 ABS 09-10",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2229STV52K",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Guzzi",
+      "model": "Stelvio 1200",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2229STVAD42",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Guzzi",
+      "model": "Stelvio 1200 / ABS",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "3222ST02",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Guzzi",
+      "model": "Stelvio 1200 MY 2011",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2229BLG9427",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Guzzi",
+      "model": "Bellagio",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2230BG27",
+      "match": "exact",
+      "space": "image",
+      "brand": "Moto Guzzi",
+      "model": "Bellagio",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2237B37SNPZ",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "1098S",
+      "verified": false,
+      "guard": false,
+      "note": "Termignoni Slip On Exhaust"
+    },
+    {
+      "code": "2237BA7LN22",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Superbike 1098 (USA)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2237B37SN01",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "1098 and 1098S",
+      "verified": false,
+      "guard": false,
+      "note": "Ducati Performance 70mm full system"
+    },
+    {
+      "code": "223737PNA2",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "1098S",
+      "verified": false,
+      "guard": false,
+      "note": "Termignoni Slip On Exhaust"
+    },
+    {
+      "code": "2237B37SNB5",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "1098S",
+      "verified": false,
+      "guard": false,
+      "note": "Ducati Performance 70mm full system"
+    },
+    {
+      "code": "22C3BC3SOB1",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "1098R",
+      "verified": false,
+      "guard": false,
+      "note": "2009-2010 years. Ducati Performance 70mm full system"
+    },
+    {
+      "code": "22A7LN40",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "1098",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2237BA7LN30",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "1098",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "3215LS29",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Streetfighter 1098",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "3215LS30",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Streetfighter 1098 (USA)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "3215PS28F",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Streetfighter 1098S (FR)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "321414PW021",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Streetfighter 1098",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "321515PSA02",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Streetfighter 1098S",
+      "verified": false,
+      "guard": false,
+      "note": "Termignoni Slip On Exhaust"
+    },
+    {
+      "code": "321515PSB2E",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Streetfighter 1098S",
+      "verified": false,
+      "guard": false,
+      "note": "Full Termignoni Exhaust"
+    },
+    {
+      "code": "321515PWA02",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Streetfighter 1098",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "321414PS021",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Streetfighter 1098S",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "32A0A0PS034",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Streetfighter 1098S 2012-2013 years",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "321414PW022",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Streetfighter 1098 no description",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "321414PS023",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Streetfighter 1098 no description",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "3213B13PT64",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "1198",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "3220B20MA14",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "1198S",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "3220TAA3",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "1198S",
+      "verified": false,
+      "guard": false,
+      "note": "Termignoni Slip On Exhaust"
+    },
+    {
+      "code": "3213STA5",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "1198",
+      "verified": false,
+      "guard": false,
+      "note": "Termignoni Slip On Exhaust"
+    },
+    {
+      "code": "3215PQ58",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "1198",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "3213B13SQBB",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "1198S",
+      "verified": false,
+      "guard": false,
+      "note": "Full Termignoni Exhaust"
+    },
+    {
+      "code": "3215PQ65",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "1198S",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "3215SQA3",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "1198S",
+      "verified": false,
+      "guard": false,
+      "note": "Termignoni Slip On Exhaust"
+    },
+    {
+      "code": "3220MA15",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "1198SP",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "3213SQA3",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "1198S",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "3220MA14",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "1198SP",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "3220TAB5",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "1198SP",
+      "verified": false,
+      "guard": false,
+      "note": "Full Termignoni Exhaust"
+    },
+    {
+      "code": "3215PT58",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "1198",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "3213PQ58",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "1198S",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "3215SQB5",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "1198S Full Termignoni Exhaust",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "3213PT58",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "1198",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2218DD08",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "999 S (USA)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2218DD10",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "999",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2218DQ07",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "999 S",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2218DQ11",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "999 S",
+      "verified": false,
+      "guard": false,
+      "note": "2005 year"
+    },
+    {
+      "code": "2218DQ13",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "999 S",
+      "verified": false,
+      "guard": false,
+      "note": "2005 year"
+    },
+    {
+      "code": "2219DD07",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "999",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2219DQ07",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "999 S",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2219DQ08",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "999 S (USA)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2219DQ09",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "999 S (UK)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2219DQ12",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "999 S",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2219DR11",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "999 R (EU)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2219DR20",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "999 R",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2219PQ14",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "999 S",
+      "verified": false,
+      "guard": false,
+      "note": "Ducati Performance 57mm full system"
+    },
+    {
+      "code": "221999SDQDP",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "999",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2218DQ12",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "999S (US)",
+      "verified": false,
+      "guard": false,
+      "note": "2005 year. Termignoni Slip On Exhaust"
+    },
+    {
+      "code": "2218DR11",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "no description",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "32A0BA0SCA2",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Streetfighter 848",
+      "verified": false,
+      "guard": false,
+      "note": "Termignoni Slip On Exhaust"
+    },
+    {
+      "code": "32A0BA0SCB2",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Streetfighter 848",
+      "verified": false,
+      "guard": false,
+      "note": "Full Termignoni Exhaust"
+    },
+    {
+      "code": "32A0A0PC030",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Streetfighter 848",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "32A0A0PC032",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Streetfighter 848",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "32A0A0PC033",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Streetfighter 848",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "32A0BA0SCA1",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Streetfighter 848",
+      "verified": false,
+      "guard": false,
+      "note": "Ducati Performance Slip On Exhaust"
+    },
+    {
+      "code": "32A0A0PC031",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Streetfighter 848 Japan only",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "22AELM33",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Superbike 848 (USA)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "321818PU016",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "848 EVO (Fr)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "22AELM26",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Superbike 848",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "321818PU017",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "848 EVO",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "321818PU015",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "848 EVO (EU)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "321818PUA05",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "848 EVO",
+      "verified": false,
+      "guard": false,
+      "note": "Ducati Performance Slip On Exhaust"
+    },
+    {
+      "code": "321818PUB03",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "848 EVO",
+      "verified": false,
+      "guard": false,
+      "note": "Full Termignoni Exhaust"
+    },
+    {
+      "code": "22AELM35",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Superbike 848",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "22AESMA2",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "848 EVO",
+      "verified": false,
+      "guard": false,
+      "note": "Ducati Performance Slip On Exhaust"
+    },
+    {
+      "code": "22ADBADSMB1",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Superbike 848",
+      "verified": false,
+      "guard": false,
+      "note": "Full Termignoni Exhaust"
+    },
+    {
+      "code": "32A0A0PD004",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "848 EVO Corse",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "32A0A0PDA05",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "848 EVO Corse SE",
+      "verified": false,
+      "guard": false,
+      "note": "Ducati Performance Slip On Exhaust"
+    },
+    {
+      "code": "32A0A0PD003",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "848 EVO Corse",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "3218SUA5",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "848 EVO Ducati Performance Slip On Exhaust",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2214DT56",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "749S",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2218DI83",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "749R",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2218DS24",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "749",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2218DS26",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "749",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2218PI82",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "749R",
+      "verified": false,
+      "guard": false,
+      "note": "Ducati Performance"
+    },
+    {
+      "code": "2218PT70",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "749S",
+      "verified": false,
+      "guard": false,
+      "note": "Ducati Performance"
+    },
+    {
+      "code": "2219DS32",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "749 (2006)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2219DS33",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "749 (2006)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2219DS34",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "749 (2006)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2219PI96",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "749R",
+      "verified": false,
+      "guard": false,
+      "note": "Ducati Performance"
+    },
+    {
+      "code": "2219PI97",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "749R",
+      "verified": false,
+      "guard": false,
+      "note": "Race kit"
+    },
+    {
+      "code": "2219PT80",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "749S",
+      "verified": false,
+      "guard": false,
+      "note": "Ducati Performance"
+    },
+    {
+      "code": "2216B16DI82",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "749R",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2218B18DT81",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "749S (USA)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2218DT80",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "749S",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2216DT72",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "749S",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "22AABA9SHB4",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Hypermotard 1100",
+      "verified": false,
+      "guard": false,
+      "note": "Termignoni 2 in 1"
+    },
+    {
+      "code": "22ABAABSHC4",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Hypermotard 1100",
+      "verified": false,
+      "guard": false,
+      "note": "With DP cam and Termignoni 2 in 1"
+    },
+    {
+      "code": "22ABBABSHA5",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Hypermotard 1100",
+      "verified": false,
+      "guard": false,
+      "note": "Ducati Performance Slip On Exhaust"
+    },
+    {
+      "code": "22ABLH01",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Hypermotard 1100",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "22ABBABLH01",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Hypermotard 1100",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "22A9A9PH023",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Hypermotard 1100S (EU)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "22A9ACPH024",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Hypermotard 1100S",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "22AABA9SHA4",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Hypermotard 1100",
+      "verified": false,
+      "guard": false,
+      "note": "Termignoni 2 in 2"
+    },
+    {
+      "code": "22ABABSHB6B",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Hypermotard 1100",
+      "verified": false,
+      "guard": false,
+      "note": "Termignoni 2 in 1"
+    },
+    {
+      "code": "22ABLH02",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Hypermotard 1100 (UK)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "22ABLH06",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Hypermotard 1100 (USA)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "22ABBABLH06",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Hypermotard 1100 (USA)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2219B19ER28",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Multistrada 620",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2218DU94",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Multistrada 1000DS",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2218DU95",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Multistrada 1000DS",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2218DU96",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Multistrada 1000DS",
+      "verified": false,
+      "guard": false,
+      "note": "Ducati Performance"
+    },
+    {
+      "code": "2219DU94",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Multistrada 1000DS",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2219DU97",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Multistrada 1000SDS",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2219PU00",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Multistrada 1000DS",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2219PU98",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Multistrada 1000DS",
+      "verified": false,
+      "guard": false,
+      "note": "Ducati Performance"
+    },
+    {
+      "code": "2235LL04",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Multistrada 1100",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2235LL05",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Multistrada 1100S",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2235SL02",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Multistrada 1100S",
+      "verified": false,
+      "guard": false,
+      "note": "Ducati Performance"
+    },
+    {
+      "code": "2219SA02",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "1000 Sport Classic",
+      "verified": false,
+      "guard": false,
+      "note": "Ducati Performance"
+    },
+    {
+      "code": "2229B29DAP5",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "1000 Sport Classic",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2229B29DAP6",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Paul Smart 1000DS",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2235B35LFPQ",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "GT 1000",
+      "verified": false,
+      "guard": false,
+      "note": "model year 2006"
+    },
+    {
+      "code": "2235B35LFPW",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "GT 1000",
+      "verified": false,
+      "guard": false,
+      "note": "model year 2006"
+    },
+    {
+      "code": "2235LF01",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "GT 1000",
+      "verified": false,
+      "guard": false,
+      "note": "model year 2006"
+    },
+    {
+      "code": "2218PG18",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster 620",
+      "verified": false,
+      "guard": false,
+      "note": "Ducati Performance"
+    },
+    {
+      "code": "2219DG18",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster 620",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2219PG20",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster 620",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2218B18DG18",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster 620",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2235LI01",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster 695",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2235SI01",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster 695",
+      "verified": false,
+      "guard": false,
+      "note": "Ducati Performance"
+    },
+    {
+      "code": "2235PI0",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster 695",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2235LG01",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster S2R 800",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2219PZ10",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster S2R 800",
+      "verified": false,
+      "guard": false,
+      "note": "Ducati Performance Exhaust"
+    },
+    {
+      "code": "2219DZ13",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster S2R 800",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2218B18DZ12",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster S2R 800",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2235B35LGPH",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster S2R 800",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2235B35LB01",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster S2R 1000",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2233SB01",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster S2R 1000 Ducati",
+      "verified": false,
+      "guard": false,
+      "note": "Monster S2R 1000 Ducati Performance full system"
+    },
+    {
+      "code": "2218PM28",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster 1000SSie",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2219DN09",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster 1000",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2229B2DFP4",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster S2R 1000",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2235LB01",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster S2R 1000",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2235LB02",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster S2R 1000 (USA)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2229B2DFP5",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster S2R 1000",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2216PN11",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster 1000",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2218DM31",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "SS 1000 DS Ducati performance",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2216DO08",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster S4R 996",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2218PO14",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster S4R 996",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2219DO14",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster S4R 996",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2235B35LEPI",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster S4R 998",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2235LE01",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster S4R 998",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2234SE01",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster S4RS 998 Ducati Performance",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2235LE02",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster S4RS 998",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2235SE01",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "Monster S4RS 998 Ducati",
+      "verified": false,
+      "guard": false,
+      "note": "Monster S4RS 998 Ducati Performance Slip On Exhaust"
+    },
+    {
+      "code": "2214EDPR",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "ST3 (2004)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2214EDUK",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "ST3 (2004)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2218ED04",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "ST3 (2004)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2218ED08",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "ST3 (2004)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2218PD08",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "ST3 (2004)",
+      "verified": false,
+      "guard": false,
+      "note": "Ducati Performance"
+    },
+    {
+      "code": "2235SC01",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "ST3 (2006)",
+      "verified": false,
+      "guard": false,
+      "note": "Ducati Performance"
+    },
+    {
+      "code": "2235SD01",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "ST3 (ABS)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2232B32LCPV",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "ST3 (2007)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2232B32LCPY",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "ST3 (2006)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2232B32LDPS",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "ST3 (ABS)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2216ED06",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "ST3 (2005) (UK)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2216ED04",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "ST3 (2005)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2218PA13",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "ST4 S",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2218PB13",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "ST4 (2005)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2219EB14",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "ST4 S ABS (2005)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2235SF01",
+      "match": "exact",
+      "space": "image",
+      "brand": "Ducati",
+      "model": "SC 1000 Biposto",
+      "verified": false,
+      "guard": false,
+      "note": "SC 1000s, GT 1000. Ducati Performance"
+    },
+    {
+      "code": "020108",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Caponord",
+      "verified": false,
+      "guard": false,
+      "note": "Tune build date: Jan 2002"
+    },
+    {
+      "code": "050108",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Caponord",
+      "verified": false,
+      "guard": false,
+      "note": "Tune build date: Jan 2005"
+    },
+    {
+      "code": "050109",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Caponord",
+      "verified": false,
+      "guard": false,
+      "note": "Tune build date: Jan 2005"
+    },
+    {
+      "code": "050115",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Caponord map with O2 sensor",
+      "verified": false,
+      "guard": false,
+      "note": "Tune build date: Jan 2005"
+    },
+    {
+      "code": "050428",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "2003 Aprilia Caponord",
+      "verified": false,
+      "guard": false,
+      "note": "Tune build date: Apr 2005"
+    },
+    {
+      "code": "050429",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "2004 Aprilia Caponord",
+      "verified": false,
+      "guard": false,
+      "note": "Tune build date: Apr 2005"
+    },
+    {
+      "code": "051123",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Caponord without O2 sensor",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "790329",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Caponord",
+      "verified": false,
+      "guard": false,
+      "note": "Tune build date: 29 Mar 2001, This is the base tune for the Aprilia Caponord"
+    },
+    {
+      "code": "921123",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Caponord",
+      "verified": false,
+      "guard": false,
+      "note": "Tune build date: 22 Nov 2001"
+    },
+    {
+      "code": "011123",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "2001 caponord no cat/ no o2",
+      "verified": false,
+      "guard": false,
+      "note": "Original map extracted from the Ecu., Thanks Stanleybobly"
+    },
+    {
+      "code": "010329MAP2001",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "2001 caponord",
+      "verified": false,
+      "guard": false,
+      "note": "base map, first base map LOADED at factory. Thanks Stanleybobly"
+    },
+    {
+      "code": "010203",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RST Futura",
+      "verified": false,
+      "guard": false,
+      "note": "(tune dated 01/02/03)"
+    },
+    {
+      "code": "010412",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RST Futura",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "010918",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RST Futura",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "050918",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RST Futura",
+      "verified": false,
+      "guard": false,
+      "note": "( 2005 Mapping ) Standard"
+    },
+    {
+      "code": "790412",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RST Futura",
+      "verified": false,
+      "guard": false,
+      "note": "2001 Mapping, This is the base tune"
+    },
+    {
+      "code": "1050FA32",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Mapping Europe for ECU 7SMHW110",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW110"
+    },
+    {
+      "code": "1050FD35",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Mapping Europe for model",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW110",
+      "note": "Mapping Europe for model with resonator exhaust and ECU 7SMHW110"
+    },
+    {
+      "code": "1050FA35",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Mapping Europe for ECU 7SMHW110",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW110"
+    },
+    {
+      "code": "1050FG37",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Mapping Europe for ECU 7SMHW110",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW110",
+      "note": "Caponord 1200 Rally MY 2015 with exhaust resonator"
+    },
+    {
+      "code": "0132D3",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Dorsoduro 750 for ECU 5DMHW430",
+      "verified": false,
+      "guard": false,
+      "ecu": "5DMHW430"
+    },
+    {
+      "code": "0134D5",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Dorsoduro 750 for ECU 5DMHW430",
+      "verified": false,
+      "guard": false,
+      "ecu": "5DMHW430"
+    },
+    {
+      "code": "0134D7",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Dorsoduro 750",
+      "verified": false,
+      "guard": false,
+      "ecu": "5DMHW430",
+      "note": "48HP Restricted Power for ECU 5DMHW430"
+    },
+    {
+      "code": "0134D6",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Dorsoduro 750",
+      "verified": false,
+      "guard": false,
+      "ecu": "5DMHW430",
+      "note": "34HP Restricted Power for ECU 5DMHW430"
+    },
+    {
+      "code": "7616BF17",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Dorsoduro 900",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW320",
+      "note": "48 HP Restricted Power for ECU 7SMHW320"
+    },
+    {
+      "code": "7616BD18",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Dorsoduro 900",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW320",
+      "note": "MY 2018 for ECU 7SMHW320"
+    },
+    {
+      "code": "1036EA84R",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Full Power mapping for",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW110",
+      "note": "Full Power mapping for Arrow Exhaust for ECU 7SMHW110"
+    },
+    {
+      "code": "1338EA07",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Standard mapping Europe for ECU 7SMHW110",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW110"
+    },
+    {
+      "code": "1338EC09",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Standard mapping for USA for ECU 7SMHW110",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW110"
+    },
+    {
+      "code": "S34EB783",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "106HP Restricted Power for ECU 7SMHW110",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW110"
+    },
+    {
+      "code": "0134A0",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Shiver 750 for ECU 5DMHW430",
+      "verified": false,
+      "guard": false,
+      "ecu": "5DMHW430"
+    },
+    {
+      "code": "0134A2",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Shiver 750 48HP Restricted",
+      "verified": false,
+      "guard": false,
+      "ecu": "5DMHW430",
+      "note": "Shiver 750 48HP Restricted Power for ECU 5DMHW430"
+    },
+    {
+      "code": "7616BE17",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Shiver 900 MY2018 restricted",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW320",
+      "note": "Shiver 900 MY2018 restricted power (48HP) for ECU 7SMHW320"
+    },
+    {
+      "code": "7616BG18",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Shiver 900 MY2018 for ECU 7SMHW320",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW320"
+    },
+    {
+      "code": "7616BH18",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Shiver 900 MY2018 USA for ECU 7SMHW320",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW320"
+    },
+    {
+      "code": "4225GAA2",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RSV 850",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "3223GA48",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RSV 850",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "4023AE01",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RSV4R MY 2009 Europe for ECU 7SMHW100",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW100"
+    },
+    {
+      "code": "1338AG13",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RSV4R MY 2011 Akrapovic",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW100",
+      "note": "RSV4R MY 2011 Akrapovic / Race for ECU 7SMHW100"
+    },
+    {
+      "code": "1338AF13",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RSV4R MY 2011 USA for ECU 7SMHW100",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW100"
+    },
+    {
+      "code": "13A9AE23",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RSV4R MY 2013 Europe for ECU 7SMHW100",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW100"
+    },
+    {
+      "code": "13A9AG23",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RSV4R MY 2013 Akrapovic",
+      "verified": false,
+      "guard": false,
+      "ecu": "75MHW100",
+      "note": "RSV4R MY 2013 Akrapovic / Race for ECU 75MHW100"
+    },
+    {
+      "code": "13A9AF23",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RSV4R MY 2014 USA for ECU 7SMHW100",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW100"
+    },
+    {
+      "code": "7614HA16",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RSV4R MY 2017 Europe for ECU 7SMHW320",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW320"
+    },
+    {
+      "code": "7614HB16",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RSV4R MY 2017 USA for ECU 7SMHW320",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW320"
+    },
+    {
+      "code": "4021AA04",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RSV4R My 2009 Europe for ECU 7SMHW100",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW100"
+    },
+    {
+      "code": "4023AC02",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RSV4R MY 2009 Restricted",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW100",
+      "note": "RSV4R MY 2009 Restricted Power for ECU 7SMHW100"
+    },
+    {
+      "code": "1338AA13",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RSV4 Factory MY 2011",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW100",
+      "note": "RSV4 Factory MY 2011 Europe for ECU 7SMHW100"
+    },
+    {
+      "code": "13A9AD23",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RSV4 Factory MY 2013",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW100",
+      "note": "RSV4 Factory MY 2013 (EU) / 2014 ( US ) Akrapovic / Race for ECU 7SMHW100"
+    },
+    {
+      "code": "1338AC13",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RSV4 Factory MY 2011",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW100",
+      "note": "RSV4 Factory MY 2011 106 HP Restricted Power for ECU 7SMHW100"
+    },
+    {
+      "code": "6403BA45",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RSV4 Factory MY 2015",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW310",
+      "note": "RSV4 Factory MY 2015 Europe for ECU 7SMHW310"
+    },
+    {
+      "code": "6404BB51",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RSV4 Factory MY 2016 USA for ECU 7SMHW310",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW310"
+    },
+    {
+      "code": "13A9AB23",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RSV4 Factory MY 2013 USA for ECU 7SMHW100",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW100"
+    },
+    {
+      "code": "7613HB12",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RSV4 Factory MY 2017 USA for ECU 7SMHW320",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW320"
+    },
+    {
+      "code": "13A9AA23",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RSV4 Factory MY 2013",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW100",
+      "note": "RSV4 Factory MY 2013 Europe for ECU 7SMHW100"
+    },
+    {
+      "code": "6404BD51",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RSV4 Factory My 2016",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW310",
+      "note": "RSV4 Factory My 2016 Akrapovic / Race for ECU 7SMHW310"
+    },
+    {
+      "code": "7617HM26",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RSV4 1100 Factory MY",
+      "verified": false,
+      "guard": false,
+      "ecu": "75MHW320",
+      "note": "RSV4 1100 Factory MY 2019 Europe for ECU 75MHW320"
+    },
+    {
+      "code": "7617HM27",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RSV4 1100 Factory MY",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW320",
+      "note": "RSV4 1100 Factory MY 2019 Europe for ECU 7SMHW320"
+    },
+    {
+      "code": "7617HN27",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RSV4 1100 Factory MY",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW320",
+      "note": "RSV4 1100 Factory MY 2019 USA for ECU 7SMHW320"
+    },
+    {
+      "code": "7617H028",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "RSV4 1100 Factory MY",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW320",
+      "note": "RSV4 1100 Factory MY 2019 Race for ECU 7SMHW320"
+    },
+    {
+      "code": "1237AH03",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Tuono V4R 1000 MY 2011 Europe",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "13A9AM14",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Tuono V4R 1000 MY 2013 Race",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "13A9AH14",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Tuono V4R 1000 MY",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW100",
+      "note": "Tuono V4R 1000 MY 2013 Europe for ECU 7SMHW100"
+    },
+    {
+      "code": "13A9AI14",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Tuono V4R 1000 MY",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW100",
+      "note": "Tuono V4R 1000 MY 2013 USA for ECU 7SMHW100"
+    },
+    {
+      "code": "1338AH04",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Tuono V4R 1000 MY 2011 Europe",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "1338AI04",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Tuono V4R 1000 MY 2011 USA",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "1338AL04",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Tuono V4R 1000 MY 2011 106HP Europe",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "6404DA51",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Tuono V4 1100 RR/RF",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW310",
+      "note": "Tuono V4 1100 RR/RF Factory MY 2015 Europe for ECU 7SMHW310"
+    },
+    {
+      "code": "6404DB51",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Tuono V4 1100 RR/RF",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW310",
+      "note": "Tuono V4 1100 RR/RF MY 2015 USA for ECU 7SMHW310"
+    },
+    {
+      "code": "6404DD51",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Tuono V4 1100 RR/RF",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW310",
+      "note": "Tuono V4 1100 RR/RF MY 2015 Akrapovic / Race for ECU 7SMHW310"
+    },
+    {
+      "code": "7614LA17",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Tuono V4 1100 RR/RF",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW320",
+      "note": "Tuono V4 1100 RR/RF MY 2017 Europe for ECU 7SMHW320"
+    },
+    {
+      "code": "7614LB17",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Tuono V4 1100 RR/RF",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW320",
+      "note": "Tuono V4 1100 RR/RF MY 2017 USA for ECU 7SMHW320"
+    },
+    {
+      "code": "7614LA20",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Tuono V4 1100 RR/RFMY",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW320",
+      "note": "Tuono V4 1100 RR/RFMY 2017 Europe for ECU 7SMHW320"
+    },
+    {
+      "code": "7614LD20",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "T uono 1100 MY",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW320",
+      "note": "T uono 1100 MY 2017 Akrapovic / Race for ECU 7SMHW320"
+    },
+    {
+      "code": "7613LB12",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Tuono 1100 MY 2017 USA for ECU 7SMHW320",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW320"
+    },
+    {
+      "code": "7614LB20",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Tuono 1100 MY 2017 USA for ECU 7SMHW320",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW320"
+    },
+    {
+      "code": "6401DA44",
+      "match": "exact",
+      "space": "image",
+      "brand": "Aprilia",
+      "model": "Tuono V4 1100 RR/RF",
+      "verified": false,
+      "guard": false,
+      "ecu": "7SMHW310",
+      "note": "Tuono V4 1100 RR/RF MY 2015 Europe for ECU 7SMHW310"
+    },
+    {
+      "code": "6011",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "Tornado factory tune for US bikes",
+      "verified": false,
+      "guard": false,
+      "note": "no more description available"
+    },
+    {
+      "code": "6012",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "Tornado tune for Bi Posto (2002)",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "6016",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "Tornado tune for Bi Posto (2002) Mid",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "6020",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "Tornado tune for Tornado RS",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "6027",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "Tornado tune for Tornado RS",
+      "verified": false,
+      "guard": false,
+      "note": "no more description available"
+    },
+    {
+      "code": "6030",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "Tornado tune for Tornado RS",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "6033",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "Tornado 903 LE Country",
+      "verified": false,
+      "guard": false,
+      "note": "Tornado 903 LE Country EU and Benelli Tornado 903 Country EU/USA. Factory map, with standard can"
+    },
+    {
+      "code": "6033AF",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "Tornado 903 and Limited",
+      "verified": false,
+      "guard": false,
+      "note": "Tornado 903 and Limited Edition model year 2003-2005 (with aftermarket pipe fitted (Dyno tuned)"
+    },
+    {
+      "code": "6033STD",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "Tornado 903 and Limited",
+      "verified": false,
+      "guard": false,
+      "note": "Tornado 903 and Limited Edition model year 2003-2005 (standard exhaust. Dyno tuned)"
+    },
+    {
+      "code": "6034",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "Tornado 903 and 903 RS",
+      "verified": false,
+      "guard": false,
+      "note": "Final factory map for open (sport) exhaust , Country EU/USA"
+    },
+    {
+      "code": "6007AF",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "Tornado tune for Tornado",
+      "verified": false,
+      "guard": false,
+      "note": "Tornado tune for Tornado series oro with after market pipe fitted (Dyno tuned)"
+    },
+    {
+      "code": "6007STD",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "Tornado tune for Tornado",
+      "verified": false,
+      "guard": false,
+      "note": "Tornado tune for Tornado series oro with standard pipe fitted (Dyno tuned)"
+    },
+    {
+      "code": "6103",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "Tornado 903 RS Final",
+      "verified": false,
+      "guard": false,
+      "note": "Tornado 903 RS Final Factory map (exhaust standard). Country EU/USA, no more description available"
+    },
+    {
+      "code": "6105",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "Tornado 903 RS",
+      "verified": false,
+      "guard": false,
+      "note": "Final Factory map for open (sport) exhaust , Country EU/USA, no more description available"
+    },
+    {
+      "code": "A10101",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "Tornado 1130 model year 2007",
+      "verified": false,
+      "guard": false,
+      "note": "EU & USA, Euro II Norm, no more description available"
+    },
+    {
+      "code": "A10201",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "Tornado 1130 model year 2007",
+      "verified": false,
+      "guard": false,
+      "note": "French, Euro II Norm, no more description available"
+    },
+    {
+      "code": "TNTR102",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "TNT R160",
+      "verified": false,
+      "guard": false,
+      "note": "Euro III Norm, Lambda control, all markets, standard air filter, dated 06-17-2010, no more description available"
+    },
+    {
+      "code": "TNTR402",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "TNT R160",
+      "verified": false,
+      "guard": false,
+      "note": "Euro III Norm, Lambda control, all markets, DNA air filter, dated 06-01-2011, no more description available"
+    },
+    {
+      "code": "TNT9101",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "TNT 899",
+      "verified": false,
+      "guard": false,
+      "note": "Euro III Norm, Lambda control, all markets, no more description available"
+    },
+    {
+      "code": "TNT9403",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "TNT 899",
+      "verified": false,
+      "guard": false,
+      "note": "all country, Euro III Norm, Lambda control, DNA air filter, dated 05-16-2011, no more description available"
+    },
+    {
+      "code": "TNT9402",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "TNT 899",
+      "verified": false,
+      "guard": false,
+      "note": "all country, Euro III Norm, Lambda control, standard air filter, dated 05-16-2011, no more description available"
+    },
+    {
+      "code": "TNT01AUF",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "TNT 1130",
+      "verified": false,
+      "guard": false,
+      "note": "Model year 2006 (and 2004 2005 with upgrade kit) Country French, Euro II Norm, standard air filter, Injectors Sagem, no more description available"
+    },
+    {
+      "code": "TNT01AU",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "TNT 1130",
+      "verified": false,
+      "guard": false,
+      "note": "Model year 2006 (and 2004 2005 with upgrade kit) Country EU, Euro II Norm , standard air filter, Injectors Sagem , no more description available"
+    },
+    {
+      "code": "TNT02",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "TNT 1130",
+      "verified": false,
+      "guard": false,
+      "note": "Model year 2007 Europe, Euro III Norm, no more description available"
+    },
+    {
+      "code": "TNT03AR",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "TNT 1130",
+      "verified": false,
+      "guard": false,
+      "note": "Model year 2004 2005, Country EU, Euro II Norm, standard air filter, Injectors Sagem, no more description available, obsolete map"
+    },
+    {
+      "code": "TNT402",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "TNT 1130",
+      "verified": false,
+      "guard": false,
+      "note": "Lambda control, all Country, Euro III Norm, DNA air filter, dated 05-16-2011, Injectors Bosch, no more description available"
+    },
+    {
+      "code": "TNTUSA01",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "TNT 1130",
+      "verified": false,
+      "guard": false,
+      "note": "model year 2006, without Lambda, Country USA, standard air filter, Injectors Sagem, no more description available"
+    },
+    {
+      "code": "TNT05",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "TNT 1130",
+      "verified": false,
+      "guard": false,
+      "note": "Map based on TNT05AN02, no more description available"
+    },
+    {
+      "code": "TNT02AR",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "obsolete map",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "TNT101",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "TNT 1130cc",
+      "verified": false,
+      "guard": false,
+      "note": "Euro III, Lambda control, Country all, standard air filter, Injectors Sagem, dated 10-26-2007, no more description available"
+    },
+    {
+      "code": "TNT103",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "TNT 1130cc",
+      "verified": false,
+      "guard": false,
+      "note": "Euro III, Lambda control, standard air filter, Injectors Bosch, dated 05-27-2010, no more description available"
+    },
+    {
+      "code": "TNT202",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "TNT 1130cc",
+      "verified": false,
+      "guard": false,
+      "note": "Euro III, Lambda control (French version 78 kw with derestriction), standard air filter, Injectors Sagem, dated 06-08-2009, no more description available"
+    },
+    {
+      "code": "TNT601",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "TNT 1130cc Titanium Euro III",
+      "verified": false,
+      "guard": false,
+      "note": "no Lambda Control, Map 0 without Db Killer, Map 1 with Db Killer"
+    },
+    {
+      "code": "TNT602",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "TNT 1130cc Titanium Euro III",
+      "verified": false,
+      "guard": false,
+      "note": "Lambda Control, Map 0 without Db Killer, Map 1 with Db Killer"
+    },
+    {
+      "code": "TREK9102",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "TREK 899",
+      "verified": false,
+      "guard": false,
+      "note": "all country, Euro III Norm, Lambda control, standard air filter, Injectors Bosch, dated 04-21-2010, no more description available"
+    },
+    {
+      "code": "TREK9401",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "TREK 899",
+      "verified": false,
+      "guard": false,
+      "note": "all country, Euro III Norm, Lambda control, DNA air filter, Injectors Bosch, dated 07-13-2011, no more description available"
+    },
+    {
+      "code": "TREK9101",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "TREK 899",
+      "verified": false,
+      "guard": false,
+      "note": "Euro III Norm, Lambda control, all markets, no more description available"
+    },
+    {
+      "code": "TREK105",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "TREK 1130",
+      "verified": false,
+      "guard": false,
+      "note": "Euro III Norm, Lambda control, standard air filter, Injectors Bosch, dated 05-27-2010, no more description available"
+    },
+    {
+      "code": "TREK401",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "TREK 1130",
+      "verified": false,
+      "guard": false,
+      "note": "Euro III Norm, Lambda control, DNA air filter, Injectors Bosch, dated 07-06-2011, no more description available"
+    },
+    {
+      "code": "TREK102",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "TREK 1130",
+      "verified": false,
+      "guard": false,
+      "note": "Euro III Norm, Lambda control, all markets, no more description available"
+    },
+    {
+      "code": "TREK103",
+      "match": "exact",
+      "space": "image",
+      "brand": "Benelli",
+      "model": "TREK 1130",
+      "verified": false,
+      "guard": false,
+      "note": "Euro III Norm, Lambda control, all markets, standard air filter, Injectors Sagem, dated 05-26-2008, no more description available"
+    },
+    {
+      "code": "225AGA40",
+      "match": "exact",
+      "space": "image",
+      "brand": "Gilera",
+      "model": "GP800",
+      "verified": false,
+      "guard": false
+    },
+    {
+      "code": "2249GA33",
+      "match": "exact",
+      "space": "image",
+      "brand": "Gilera",
+      "model": "GP800",
+      "verified": false,
+      "guard": false
+    }
+  ]
+}

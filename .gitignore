@@ -1,0 +1,64 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+# runtime artifacts / captures — nothing a board produced may reach GitHub
+*.ndjson
+*.log
+*.log.zip
+/root-k-line/
+config/config.json
+.DS_Store
+config/selected.json
+old_logs/
+config/fw_catalog.user.json
+
+# ride, diagnostics and firmware-operation logs, wherever they are copied to
+kline-*.csv
+kline-*.raw.log*
+scan-*.csv
+scan-*.ndjson*
+diag-*.log*
+fw-*.log*
+k-line/
+logs/
+
+# ECU firmware images and their sidecars: private property, ~320 KB each
+*.bin
+*.bin.txt
+*.hex
+*.s19
+firmware/
+/root-firmware/
+
+# personal context dump for new chat sessions, not part of the project
+CONTEXT.md
+
+# VERSION is tracked and hand-bumped (the release number). BUILD is stamped by
+# deploy.sh / release.sh next to it — the number plus the commit and the date —
+# and is generated, never committed.
+/BUILD
+/dist/
+
+# board address / credentials for deploy.sh — never commit
+.deploy.env
+
+# local reference material kept beside the checkout, never part of the project:
+# vendor text dumps and their .ini files, which carry the owner's own paths
+*.exe.txt
+*.ini
+
+# captured ride logs, scans and ECU dumps pulled off the board for analysis
+old_logs/
+
+# Internal working notes — the private archive keeps them tracked (a .gitignore
+# entry never untracks a file that is already in the index), while the public
+# mirror drops them: the content sync copies this file too, so once they were
+# `git rm --cached`ed there they stay untracked on every later sync.
+/CLAUDE.md
+/HANDOFF.md
+
+# nested worktrees Claude Code creates here — a checkout inside a checkout
+.claude/worktrees/
