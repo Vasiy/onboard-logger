@@ -40,7 +40,11 @@ parameters and records to `/root/k-line/`.
     from a handlebar mount) and the checkbox list; the choice is remembered per device.
   - *Firmware* — read/write the ECU image via [`denandz/5am_util`](https://github.com/denandz/5am_util);
     the Read block shows the live ECU description (saved into a labelled `.txt` on read);
-    upload/download/diff/delete `.bin` (+`.txt`), exact-size (327680 B) write gate.
+    upload/download/diff/delete `.bin` (+`.txt`), exact-size (327680 B) write gate. `GET
+    /api/firmware` and `GET /api/firmware/files/{name}` answer any origin, read-only, so a
+    separately hosted [`ecu-map-viewer`](https://github.com/Vasiy/ecu-map-viewer) can read
+    stored images straight off the board without a copy step; every other firmware route
+    stays same-origin.
   - *K-Line logs* — checkbox list, download/delete, and a **Preview** that plots normalized decoded
     CSV (canvas, wheel-zoom / drag-pan, series toggles, value hover).
   - *Testing* — **read/clear fault codes** (SAE decode, localized descriptions, *stored vs current*

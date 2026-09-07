@@ -505,6 +505,24 @@ async def _no_cache(request, call_next):
     return resp
 
 
+@app.middleware("http")
+async def _cors_firmware_read(request, call_next):
+    """Let a separately-hosted ecu-map-viewer read firmware images straight off
+    this board instead of a rider copying them by hand.
+
+    Scoped to GET under /api/firmware: every one of those routes only reads
+    (listing, a size/guard check, a .bin's bytes) -- never the read/write/
+    rename/delete/upload verbs, which stay POST/DELETE and so never see this
+    header. A plain cross-origin GET is not preflighted, so this is the whole
+    story; nothing here widens what a request may *do*, only who may read the
+    response.
+    """
+    resp = await call_next(request)
+    if request.method == "GET" and request.url.path.startswith("/api/firmware"):
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
+
+
 # -- pages / static --------------------------------------------------------
 @app.get("/")
 async def index():
