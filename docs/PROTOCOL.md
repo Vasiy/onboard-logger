@@ -4,7 +4,7 @@ Everything below is what a **Magneti Marelli IAW 5AM (HW610)** actually answers 
 established by observation and verified against a live capture from a Moto Guzzi carrying that
 ECU. Where a value is still a guess, it says so.
 
-Русская версия: [PROTOCOL.ru.md](PROTOCOL.ru.md).
+Russian version: [PROTOCOL.ru.md](PROTOCOL.ru.md).
 
 ---
 
@@ -109,25 +109,50 @@ lambdas oscillating):
 | 0x32 | Air temp       | raw − 40       | °C   | ~ambient |
 | 0x33 | Coolant temp   | raw − 40       | °C   | rises on warm-up |
 | 0x34 | Throttle       | raw / 10       | °    | idle ~1.8° |
-| 0x35 | Advance        | raw            | °    | reads ~200 raw — scale to confirm |
-| 0x37 | Injection      | raw / 20       | ms   | 4–29 ms |
-| 0x39 | Idle governor  | raw            | rpm  | governor output; ~1281 at warm idle, lags actual rpm when riding |
+| 0x35 | Advance (latched)| raw / 10     | °    | 20.0° at warm idle; freezes at its last value with the engine stopped |
+| 0x37 | Advance (live) | raw / 10       | °    | the same value while running; a fixed 8.0° whenever the engine is not turning |
+| 0x39 | Injection      | raw / 1000     | ms   | 0 stopped, 8.6 ms cranking, ~1.4 ms at warm idle |
 | 0x3A | Idle target    | raw            | rpm  | target idle vs temp: 1571 cold → 1401 warm (matches the ECU map) |
-| 0x3B | CO / duty      | raw            | %    | 8-bit |
 | 0x3C | Battery        | raw / 10       | V    | 11.9–14.1 V |
 | 0x45 | Lambda F (front)| raw           | mV   | oscillates (closed loop) |
-| 0x46 | Lambda R (rear) | raw           | mV   | 2nd lambda |
-| 0x47 | Fuel trim F    | raw / 100      | %    | signed 16-bit |
-| 0x48 | Fuel trim R    | raw / 100      | %    | signed 16-bit |
+| 0x46 | Lambda R (rear) | raw           | mV   | 2nd lambda; a constant zero on images that stub it |
+| 0x47 | Lambda integrator F | raw / 10  | %    | signed 16-bit, −18…+25 % |
+| 0x48 | Lambda integrator R | raw / 10  | %    | signed 16-bit; a constant zero on images that stub it |
+| 0x4B | Lambda phase F | raw            | —    | 1 frozen, 2 cold sensor, 3/4 open loop, 5 closed loop leaning out, 7 closed loop enriching |
+| 0x53 | Road speed     | raw            | km/h | 0 standing, 87 at the 8384 rpm limiter in second; rpm/speed gives the gear |
+| 0x6B | Idle stepper base | raw         | steps| temperature-scheduled: 117 at 51 °C, 100 from 75 °C up |
+| 0x6C | Idle stepper position | raw     | steps| 0x6B + 0x6D; the sum is exact in 83 % of samples and within ±2 in 99 % |
+| 0x6D | Idle stepper trim | raw         | steps| signed; the closed-loop offset carried on top of 0x6B |
 
 Cylinders are **F/R (front/rear)** per Moto Guzzi / Ducati / Moto Morini V-twin layout.
-The remaining `rli` (0x31, 0x36, 0x38, 0x3D–0x44, 0x49–0x7F) are readable but unnamed. From the
-2026-08-21 capture a few have a working guess, carried in the param name in brackets: 0x3E config/ID byte (const 52), 0x49 status
-flag (0/2, closed-loop?), 0x4B counter/status (0–7), 0x54 / 0x55 raw ADC channels (weak +0.2 correlation
-with rpm and injection), 0x57 status (const 4, rarely 16), 0x58 status/gear? (0–7).
+Further named channels carry a decoder from `config/status_maps.json`: 0x49 the lambda loop flag
+(0 open, 2 closed), 0x58 the engine-state bitfield (0x01 closed throttle, 0x02 after-start phase over,
+0x04 engine turning), 0x61 the neutral flag, 0x76 the side stand and 0x78 the clutch. 0x54 / 0x55 are a
+coil charge time compensated for battery voltage; the count stays raw.
+
+Five more identifiers carry a state rather than a measurement. **0x7A and 0x79 are one input reported
+twice**, strictly inverse across every sample where both were read; 0x7A stands at 1 whenever the
+engine runs and flips to 1 in the sample the starter engages, which reads as the kill switch, RUN on
+0x7A and STOP on 0x79. **0x57 is a stop-state code**: 4 while the engine runs, 8 once it has stopped,
+and 16 both at the instant of one stop and some 18 s after another. **0x62** is 0 stopped, 4 at idle
+and 2 off idle, flickering between the two around 1300–1700 rpm on a closed throttle. **0x5C** carries
+the same closed-throttle decision as 0x58's 0x01 bit, coded 1 shut and 4 open, and is read a request
+earlier. **0x75** goes to 1 in the sample the starter engages and stays there while the engine runs.
+
+**38 of the 79 answer a constant zero.** The image serves them from three shared slots — one for a
+2-byte zero, one for a 1-byte zero, one for the two 3-byte identifiers — so there is no variable
+behind them and no condition that makes them move: 0x31, 0x36, 0x38, 0x3B, 0x3F–0x44, 0x46, 0x48,
+0x4A, 0x4C, 0x4D, 0x4E, 0x50–0x52, 0x56, 0x59–0x5B, 0x64–0x69, 0x6F, 0x71–0x73 and 0x7B–0x7F. The
+four in that list that name the rear bank (0x46, 0x48, 0x4A, 0x4C) are stubbed on this image; other
+builds of the same ECU wire a second sensor. Of the 41 identifiers that have a slot of their own,
+24 are the named channels above, 11 more are named but not yet proven on a bike, and 6 carry no
+established meaning at all: 0x3E (a config/ID byte, a constant 52 through a whole cold start), 0x5D,
+0x5E, 0x5F, 0x63 (a flat zero through the rev limiter, full throttle and a warm-up to 97 °C) and
+0x6A (0 at closed throttle and flat out alike, 5..21 on a moderate steady throttle).
 
 `config/params.json` schema: `{key, name, rli, fmt(2/0), offset, length, endian, signed, scale,
-bias, recip, digits, default}`. `recip != 0` → `value = recip / raw` (period-style). `default`
+bias, recip, digits, default, group, map, map_type, dead}`. `dead` marks an identifier served by one
+of those shared zero slots: the record stays, but nothing may select it. `recip != 0` → `value = recip / raw` (period-style). `default`
 = selected for the decoded log at startup (named channels on, unidentified off). The worker polls
 **only selected** params, so fewer selected = higher poll rate.
 

@@ -45,7 +45,18 @@
   },
   "system": {
     "auto_time_sync": true,
-    "fw_guard_override": false
+    "fw_guard_override": false,
+    "cpu": {
+      "governor": "",
+      "max_khz": 0
+    }
+  },
+  "gear": {
+    "enabled": true,
+    "primary": 1.836,
+    "final": [17, 40],
+    "teeth": [[13, 36], [17, 32], [20, 30], [22, 28], [23, 26], [24, 25]],
+    "wheel_circumference_m": 2.0163
   },
   "logging": {
     "decoded_default": true,

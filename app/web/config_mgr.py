@@ -99,30 +99,30 @@ class ConfigManager:
         wifi = cfg["wifi"]
         mode = self.mode(cfg)
         if wifi.get("mode", "ap") not in ("ap", "client"):
-            raise ValueError("Режим Wi-Fi: ap или client")
+            raise ValueError("Wi-Fi mode: ap or client")
         if not (1 <= len(wifi["ssid"]) <= 32):
-            raise ValueError("SSID должен быть 1..32 символа")
+            raise ValueError("SSID must be 1..32 characters")
         pw = wifi.get("password", "")
         if pw and not (8 <= len(pw) <= 63):
-            raise ValueError("Пароль WPA2 должен быть 8..63 символа (или пустой = открытая сеть)")
+            raise ValueError("WPA2 password must be 8..63 characters (empty = open network)")
         if not (1 <= int(wifi["channel"]) <= 14):
-            raise ValueError("Канал Wi-Fi должен быть 1..14")
+            raise ValueError("Wi-Fi channel must be 1..14")
 
         client = wifi.get("client", {})
         if mode == "client":
             if not (1 <= len(client.get("ssid", "")) <= 32):
-                raise ValueError("Сеть для подключения: укажите SSID")
+                raise ValueError("Network to join: give an SSID")
             cpw = client.get("password", "")
             if cpw and not (8 <= len(cpw) <= 63):
-                raise ValueError("Пароль сети должен быть 8..63 символа (или пустой = открытая)")
+                raise ValueError("Network password must be 8..63 characters (empty = open)")
             if str(client.get("ipv4", "dhcp")) not in ("dhcp", "static"):
-                raise ValueError("Адрес клиента: dhcp или static")
+                raise ValueError("Client address: dhcp or static")
             if str(client.get("ipv4", "dhcp")) == "static":
                 cip = ipaddress.ip_address(client.get("ip", ""))
                 cnet = ipaddress.ip_network(f"{cip}/{int(client.get('prefix', 24))}", strict=False)
                 gw = client.get("gateway", "")
                 if gw and ipaddress.ip_address(gw) not in cnet:
-                    raise ValueError(f"Шлюз {gw} вне подсети {cnet}")
+                    raise ValueError(f"Gateway {gw} is outside subnet {cnet}")
                 for d in str(client.get("dns", "")).replace(",", " ").split():
                     ipaddress.ip_address(d)   # raises on junk
 
@@ -132,40 +132,40 @@ class ConfigManager:
         subnet = ipaddress.ip_network(f"{ap_ip}/{prefix}", strict=False)
         ap_gw = net.get("gateway", "")
         if ap_gw and ipaddress.ip_address(ap_gw) not in subnet:
-            raise ValueError(f"Адрес маршрутизатора {ap_gw} вне подсети {subnet}")
+            raise ValueError(f"Router address {ap_gw} is outside subnet {subnet}")
 
         dhcp = cfg["dhcp"]
         if dhcp["enabled"]:
             start = ipaddress.ip_address(dhcp["pool_start"])
             end = ipaddress.ip_address(dhcp["pool_end"])
             if start > end:
-                raise ValueError("Начало пула DHCP больше конца")
+                raise ValueError("DHCP pool start is above its end")
             for ip in (start, end):
                 if ip not in subnet:
-                    raise ValueError(f"Адрес пула {ip} вне подсети {subnet}")
+                    raise ValueError(f"Pool address {ip} is outside subnet {subnet}")
             if ap_ip in {start, end} or start <= ap_ip <= end:
-                raise ValueError("IP точки доступа не должен входить в пул DHCP")
+                raise ValueError("The access point IP must not fall inside the DHCP pool")
 
         host = cfg.get("hostname", "")
         if host and not all(c.isalnum() or c == "-" for c in host):
-            raise ValueError("Hostname: только буквы, цифры и дефис")
+            raise ValueError("Hostname: letters, digits and hyphen only")
 
         country = wifi.get("country", "")
         if not (len(country) == 2 and country.isalpha()):
-            raise ValueError("Код страны: 2 буквы (например DE)")
+            raise ValueError("Country code: 2 letters (DE, for instance)")
 
         baud = cfg.get("kline", {}).get("baud", "auto")
         if str(baud).lower() != "auto":
             try:
                 b = int(baud)
             except (TypeError, ValueError):
-                raise ValueError("Скорость шины: Auto или число")
+                raise ValueError("Bus speed: Auto or a number")
             if not (300 <= b <= 115200):
-                raise ValueError("Скорость шины вне диапазона 300..115200")
+                raise ValueError("Bus speed outside 300..115200")
 
         locale = cfg.get("locale", "en")
         if locale not in {"en", "de", "es", "fr", "it", "nl", "bg", "ru"}:
-            raise ValueError(f"Неизвестная локаль: {locale}")
+            raise ValueError(f"Unknown locale: {locale}")
 
         # the diagnostics log shares the SD card with the ride logs: a limit of
         # 0 would rotate on every line, a huge one fills the card
@@ -173,18 +173,18 @@ class ConfigManager:
         try:
             mb = float(mb)
         except (TypeError, ValueError):
-            raise ValueError("Размер diag-файла: число в МБ")
+            raise ValueError("Diagnostics file size: a number in MB")
         if not (0.05 <= mb <= 64):
-            raise ValueError("Размер diag-файла: 0.05..64 МБ")
+            raise ValueError("Diagnostics file size: 0.05..64 MB")
 
         # the log destination is picked through /api/storage (which has to mount
         # something); this only stops a hand-edited config.json from arriving
         st = cfg.get("storage", {})
         if st.get("dest", "internal") not in ("internal", "usb"):
-            raise ValueError("Место записи: internal или usb")
+            raise ValueError("Log destination: internal or usb")
         mp = str(st.get("mount_point", "/media/usb0"))
         if not mp.startswith("/") or ".." in mp:
-            raise ValueError("Точка монтирования: абсолютный путь")
+            raise ValueError("Mount point: an absolute path")
 
     # -- rendering ---------------------------------------------------------
     def render_hostapd(self, cfg: dict) -> str:
@@ -213,16 +213,16 @@ class ConfigManager:
     def _run(cmd: list[str], msgs: list[str]) -> bool:
         exe = shutil.which(cmd[0])
         if exe is None:
-            msgs.append(f"пропущено (нет {cmd[0]}): {' '.join(cmd)}")
+            msgs.append(f"skipped (no {cmd[0]}): {' '.join(cmd)}")
             return False
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
             if r.returncode != 0:
-                msgs.append(f"ошибка `{' '.join(cmd)}`: {r.stderr.strip() or r.stdout.strip()}")
+                msgs.append(f"failed `{' '.join(cmd)}`: {r.stderr.strip() or r.stdout.strip()}")
                 return False
             return True
         except (OSError, subprocess.SubprocessError) as exc:
-            msgs.append(f"исключение `{' '.join(cmd)}`: {exc}")
+            msgs.append(f"raised `{' '.join(cmd)}`: {exc}")
             return False
 
     def _write_conf(self, path: Path, content: str, msgs: list[str],
@@ -233,7 +233,7 @@ class ConfigManager:
             if mode is not None:
                 path.chmod(mode)
         except OSError as exc:
-            msgs.append(f"не удалось записать {path}: {exc}")
+            msgs.append(f"could not write {path}: {exc}")
 
     def _set_wlan_ip(self, ap_ip: str, prefix: int, msgs: list[str]) -> None:
         self._run(["ip", "addr", "flush", "dev", self.iface], msgs)
@@ -303,7 +303,7 @@ class ConfigManager:
         self._run(["ip", "addr", "flush", "dev", self.iface], msgs)
         self._run(["ip", "link", "set", self.iface, "up"], msgs)
         self._run(["systemctl", "restart", f"wpa_supplicant@{self.iface}"], msgs)
-        applied.append(f"Режим Wi-Fi → клиент ({ssid})")
+        applied.append(f"Wi-Fi mode -> client ({ssid})")
 
         static = str(client.get("ipv4", "dhcp")) == "static"
         if static:
@@ -315,10 +315,10 @@ class ConfigManager:
             dns = str(client.get("dns", "")).replace(",", " ").split()
             if dns:
                 self._run(["resolvectl", "dns", self.iface, *dns], msgs)
-            applied.append(f"Адрес вручную → {client.get('ip', '')}/{client.get('prefix', 24)}")
+            applied.append(f"Static address -> {client.get('ip', '')}/{client.get('prefix', 24)}")
         else:
             self._run(["dhcpcd", "-b", self.iface], msgs)
-            applied.append("Адрес по DHCP")
+            applied.append("Address by DHCP")
 
         ok, why = self.wait_client_up()
         report = {
@@ -334,7 +334,7 @@ class ConfigManager:
             "fallback_to_ap": False,
         }
         if not ok:
-            msgs.append(f"клиентский режим не поднялся: {why} — возвращаю точку доступа")
+            msgs.append(f"client mode did not come up: {why} -- putting the access point back")
             ap_cfg = copy.deepcopy(cfg)
             ap_cfg["wifi"]["mode"] = "ap"
             back = self.apply_network(ap_cfg, prev=None)   # prev=None -> full re-apply
@@ -354,8 +354,8 @@ class ConfigManager:
                 return True, ""
             time.sleep(1.0)
         if not st["associated"]:
-            return False, "нет ассоциации с сетью (SSID, пароль или уровень сигнала)"
-        return False, "ассоциация есть, но адреса нет (DHCP не ответил)"
+            return False, "not associated with the network (SSID, password or signal)"
+        return False, "associated but with no address (DHCP did not answer)"
 
     def set_hostname(self, name: str, msgs: list[str]) -> None:
         self._run(["hostnamectl", "set-hostname", name], msgs)
@@ -394,8 +394,8 @@ class ConfigManager:
         elif mode == "client":
             client = cfg["wifi"].get("client", {})
             if d["wifi"]:
-                applied.append(f"Режим Wi-Fi → клиент ({client.get('ssid', '')})")
-                applied.append("Адрес вручную" if client.get("ipv4") == "static" else "Адрес по DHCP")
+                applied.append(f"Wi-Fi mode -> client ({client.get('ssid', '')})")
+                applied.append("Static address" if client.get("ipv4") == "static" else "Address by DHCP")
             return {
                 "applied": applied,
                 "messages": [],
@@ -406,26 +406,26 @@ class ConfigManager:
                 "ap_ip": cfg["network"]["ap_ip"],
             }
         if d["wifi"]:
-            applied.append("Режим Wi-Fi → точка доступа" if mode_changed else "Wi-Fi (hostapd)")
+            applied.append("Wi-Fi mode -> access point" if mode_changed else "Wi-Fi (hostapd)")
         if d["ip"]:
-            applied.append(f"IP точки доступа → {cfg['network']['ap_ip']}")
+            applied.append(f"Access point IP -> {cfg['network']['ap_ip']}")
         if d["dhcp"] or d["ip"]:
-            applied.append("DHCP включён" if cfg["dhcp"]["enabled"] else "DHCP выключен")
+            applied.append("DHCP on" if cfg["dhcp"]["enabled"] else "DHCP off")
         if d["hostname"] and cfg.get("hostname"):
             applied.append(f"Hostname → {cfg['hostname']}")
         # non-network changes (applied live by main.post_config)
         pk = (prev or {}).get("kline", {})
         nk = cfg.get("kline", {})
         if prev is None or pk.get("baud") != nk.get("baud"):
-            applied.append(f"Скорость шины → {nk.get('baud')}")
+            applied.append(f"Bus speed -> {nk.get('baud')}")
         if prev is None or pk.get("echo") != nk.get("echo"):
-            applied.append("Эхо K-Line")
+            applied.append("K-Line echo")
         if prev is None or pk.get("init") != nk.get("init"):
             applied.append(f"Init K-Line → {nk.get('init', 'fast')}")
         if prev is not None and prev.get("logging") != cfg.get("logging"):
-            applied.append("Логирование по умолчанию")
+            applied.append("Default logging")
         if prev is not None and prev.get("locale") != cfg.get("locale"):
-            applied.append(f"Язык → {cfg.get('locale')}")
+            applied.append(f"Language -> {cfg.get('locale')}")
         return {
             "applied": applied,
             "messages": [],
@@ -464,7 +464,7 @@ class ConfigManager:
         # its 30 s wait-for-wlan0 pre-start and stall whoever called us.
         if not self.iface_present():
             wifi_changed = ip_changed = dhcp_changed = False
-            msgs.append(f"интерфейс {self.iface} отсутствует — Wi-Fi не настраивается")
+            msgs.append(f"interface {self.iface} is absent -- Wi-Fi is not configured")
 
         if self.mode(cfg) == "client" and self.iface_present():
             if not wifi_changed:
@@ -484,12 +484,16 @@ class ConfigManager:
             return rep
 
         # AP owns the radio: make sure the station side is not still holding it
-        # (and that hostapd comes back at boot after a spell in client mode)
+        # (and that hostapd comes back at boot after a spell in client mode).
+        # Enabling the unit is safe even though the dongle may be gone by the next
+        # boot: its drop-in carries ConditionPathExists=/sys/class/net/wlan0, so
+        # with no radio systemd skips it rather than sitting in the 30 s pre-start
+        # and then restarting forever.
         if self.iface_present() and (prev is None or self.mode(prev) == "client"):
             self._stop_client(msgs)
             self._run(["systemctl", "enable", "hostapd"], msgs)
             if prev is not None:
-                applied.append("Режим Wi-Fi → точка доступа")
+                applied.append("Wi-Fi mode -> access point")
 
         # 1. hostapd (SSID / passphrase / channel) — auto-pick the quietest
         #    channel first (scan needs the radio free, so stop hostapd)
@@ -506,13 +510,13 @@ class ConfigManager:
                     self.last_scan_ts = time.time()
                     render_cfg = copy.deepcopy(cfg)
                     render_cfg["wifi"]["channel"] = chosen
-                    m = f"авто-канал {chosen} (AP рядом: {info.get('aps_seen', '?')})"
+                    m = f"auto channel {chosen} (APs nearby: {info.get('aps_seen', '?')})"
                     applied.append(m)
                     print(f"[wifi] {m} {info.get('candidates', '')}", flush=True)
                 else:
                     msgs.append(
-                        f"авто-канал не выбран ({info.get('error', '?')}), "
-                        f"канал {cfg['wifi']['channel']}"
+                        f"auto channel not picked ({info.get('error', '?')}), "
+                        f"channel {cfg['wifi']['channel']}"
                     )
             self._write_conf(self.hostapd_conf, self.render_hostapd(render_cfg), msgs)
             self._run(["systemctl", "restart", "hostapd"], msgs)
@@ -522,7 +526,7 @@ class ConfigManager:
         # 2. wlan0 IP
         if ip_changed:
             self._set_wlan_ip(net["ap_ip"], prefix, msgs)
-            applied.append(f"IP точки доступа → {net['ap_ip']}")
+            applied.append(f"Access point IP -> {net['ap_ip']}")
             reconnect = True
 
         # 3. DHCP / dnsmasq
@@ -530,10 +534,10 @@ class ConfigManager:
             if cfg["dhcp"]["enabled"]:
                 self._write_conf(self.dnsmasq_conf, self.render_dnsmasq(cfg), msgs)
                 self._run(["systemctl", "restart", "dnsmasq"], msgs)
-                applied.append("DHCP включён")
+                applied.append("DHCP on")
             else:
                 self._run(["systemctl", "stop", "dnsmasq"], msgs)
-                applied.append("DHCP выключен")
+                applied.append("DHCP off")
 
         # 4. hostname
         if host_changed and cfg.get("hostname"):

@@ -111,7 +111,7 @@ def _run(cmd: list[str], stdin_text: str = "", timeout: float = 20) -> tuple[boo
     contract otherwise, and the single seam the tests replace with a recorder.
     """
     if shutil.which(cmd[0]) is None:
-        return False, f"нет {cmd[0]}"
+        return False, f"no {cmd[0]}"
     try:
         r = subprocess.run(cmd, input=stdin_text or None, capture_output=True,
                            text=True, timeout=timeout)

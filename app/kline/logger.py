@@ -17,6 +17,7 @@ from pathlib import Path
 from app.web.storage import day_name, resolve_root
 
 from .ecu_id import DEFAULT_FIELDS, describe, parse_fields
+from .gear import GearMap, GearReader
 from .params import ParamMap
 from .kwp2000 import KWP2000Session, NegativeResponse
 from .transport import ChecksumError, KLineError, KLineTimeout, KLineTransport
@@ -63,8 +64,13 @@ class KLineWorker(threading.Thread):
         reconnect_delay: float = 2.0,
         session_init: bool = True,
         diag=None,
+        gear_cfg=None,
     ):
         super().__init__(name="kline-worker", daemon=True)
+        # The gear is not a channel the ECU has: it falls out of rpm and road
+        # speed once the gearbox is described in config. Built here so the poll
+        # loop only has to ask.
+        self._gear = GearReader(GearMap(gear_cfg or {}))
         self.diag = diag            # DiagLog or None; every call is best-effort
         self.port = port
         self._ecu_fields = ecu_fields or DEFAULT_FIELDS
@@ -180,7 +186,7 @@ class KLineWorker(threading.Thread):
         """Set which parameters are logged to the decoded CSV. Changing the set
         while a decoded log is open rolls it to a fresh file (new column header)
         so the CSV stays consistent."""
-        valid = {p.key for p in self.pmap.params}
+        valid = self.pmap.selectable()      # a dead rli is never polled
         sel = [k for k in keys if k in valid]
         with self._lock:
             self._selected = sel
@@ -734,6 +740,19 @@ class KLineWorker(threading.Thread):
         self._close_all_logs()
         self.led.off()
 
+    def _derive(self, kind: str, values: dict):
+        """Values the board works out rather than asks for.
+
+        The dependencies are read from what was actually polled and are never
+        pulled in behind the rider's back: a hidden request would make the cost
+        estimate lie about the set it is pricing. A set without them simply
+        reads "--", which is why the preset takes all of them together.
+        """
+        if kind != "gear":
+            return None
+        return self._gear.update(values.get("rpm"), values.get("r53"),
+                                 values.get("neutral"), values.get("clutch"))
+
     def _poll_loop(self, session: KWP2000Session) -> None:
         try:
             self._poll_loop_inner(session)
@@ -760,7 +779,8 @@ class KLineWorker(threading.Thread):
             # can change live, so it is re-read each cycle.
             with self._lock:
                 sel = set(self._selected)
-            to_poll = [p for p in pmap.params if p.key in sel]
+            to_poll = [p for p in pmap.params if p.key in sel and not p.derived]
+            derived = [p for p in pmap.params if p.key in sel and p.derived]
             values: dict = {}
             probes: list[dict] = []
             cache: dict[tuple[int, bool], dict] = {}   # dedupe params sharing an rli
@@ -786,6 +806,12 @@ class KLineWorker(threading.Thread):
             # Nothing selected -> the keepalive below holds the session open.
             if to_poll and not got_any:
                 session.tester_present()
+
+            # Worked out from what was just polled, before anything sees the
+            # dict: the snapshot, the tiles, the decoded CSV and the presets all
+            # then treat it as an ordinary column.
+            for p in derived:
+                values[p.key] = self._derive(p.derived, values)
 
             self.state.update_values(values)
 

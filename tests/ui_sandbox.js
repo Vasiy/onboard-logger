@@ -180,6 +180,9 @@ function makeSandbox(opts = {}) {
     },
     getSelection: () => ({ removeAllRanges() {}, addRange() {} }),
     matchMedia: () => ({ matches: false, addEventListener() {}, addListener() {} }),
+    // cssVar() reads theme colours through this; the value never matters
+    // here, only that asking for one does not throw
+    getComputedStyle: () => ({ getPropertyValue: () => "" }),
     URL: { createObjectURL: () => "blob:x", revokeObjectURL() {} },
   };
   sandbox.window = sandbox;

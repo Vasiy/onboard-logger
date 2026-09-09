@@ -49,11 +49,28 @@ Lo que hace, en orden:
    externo al que llaman la lectura y la escritura de firmware.
 5. **Siembra la configuración de ejecución** en `/etc/onboard-logger/`: `config.json`, `params.json`,
    `ecu_id.json` — **solo si no están** (`[ -f ] || cp`). Véase *Configuración por capas* más abajo.
-6. **Regla udev** → `/dev/kline`, se le dice a **NetworkManager** que deje en paz `wlan0`, se
-   desbloquea la radio y se fija el dominio regulatorio desde `wifi.country`.
+6. **Reglas udev** — `/dev/kline`; la gestión de energía USB en ejecución **desactivada** para el
+   concentrador raíz OTG, el cable FTDI, el adaptador Wi-Fi y el concentrador que los lleva; y una
+   regla que vuelve a aplicar el punto de acceso (dirección, hostapd, dnsmasq) cada vez que `wlan0`
+   reaparece tras una reenumeración USB. Suspender el concentrador raíz dwc2 atasca su propia ruta
+   de reanudación y hace ciclar el bus bajo los adaptadores: así es como un cable FTDI y un
+   adaptador se caen a la vez en plena marcha.
+   A **NetworkManager** se le dice que deje en paz `wlan0`, se desbloquea la radio y se fija el
+   dominio regulatorio desde `wifi.country`.
 7. **Autoarranque de hostapd/dnsmasq desactivado**: la aplicación los levanta ella misma una vez
-   generada la configuración, así su propio orden de arranque no puede fallar antes.
+   generada la configuración, así su propio orden de arranque no puede fallar antes. hostapd recibe
+   además un drop-in con `ConditionPathExists=/sys/class/net/wlan0`: sin adaptador la unidad se
+   omite, en lugar de esperar 30 s una interfaz que no va a aparecer y luego reiniciarse sin fin.
 8. **Unidad systemd** instalada, habilitada y arrancada.
+9. **Disciplina de registros**: el diario limitado a 64 MB y el retardo de escritura diferida de la
+   caché de páginas reducido a ~5 s: la moto corta la corriente con el encendido, un apagado limpio
+   es la excepción. A `rsyslog` se le estrecha en lugar de quitarlo: su regla `*.*` de serie
+   escribía cada línea una segunda vez en la tarjeta, pero los eventos propios de la placa conservan
+   una copia en texto plano en `/var/log/onboard-logger.log`, porque un corte de corriente puede
+   truncar el diario binario donde una línea de texto sobrevive.
+10. **La imagen de fábrica se recorta**: `multi-user.target` por defecto, y ModemManager, Bluetooth,
+    `NetworkManager-wait-online` y los temporizadores diarios de apt desactivados. Juntos cuestan
+    unos diez segundos de cada arranque, y la moto no tiene internet para ellos.
 
 Después:
 
@@ -233,6 +250,45 @@ mv /opt/onboard-logger.failed/.venv /opt/onboard-logger/.venv   # si el restaura
 mv /opt/onboard-logger.failed/bin   /opt/onboard-logger/bin
 systemctl start onboard-logger
 ```
+
+---
+
+## Complementos
+
+Un complemento es una página que la placa sirve y un almacén que guarda para ella. **Ningún
+código de un complemento se ejecuta en la placa** — es solo contenido, y por eso puede instalarse
+desde un teléfono. El único que existe es el visor de mapas: `./release-addon.sh` en
+`ecu-map-viewer` construye `ecu-map-viewer-addon-<versión>-<sha>.tar.gz`, y lo acepta
+**Config → System → Complementos**.
+
+Todo lo que posee un complemento vive en un solo directorio:
+
+```
+/opt/onboard-logger/addons/maps/addon.json   nombre, versión, título
+/opt/onboard-logger/addons/maps/web/         la página, servida en /addons/maps/
+/opt/onboard-logger/addons/maps/data/        archivos del complemento, solo por la API
+```
+
+La separación es deliberada. Si los archivos guardados estuvieran dentro del árbol servido también
+serían alcanzables como contenido estático tipado por su extensión, y un `.html` subido correría
+en el propio origen de esta placa. Servir y guardar son puertas distintas.
+
+`addons/` es lo tercero que vive dentro de `/opt/onboard-logger` sin venir de ninguna versión; los
+otros dos son `.venv` y `bin/5am_util`. Por eso `deploy.sh` lo excluye (lo que además lo protege de
+`--delete`), una actualización lo pasa al otro lado del intercambio y la reversión lo trae de
+vuelta. Un despliegue desde el equipo de desarrollo nunca toca un complemento instalado ni sus
+archivos.
+
+**Quitarlo es `rm -rf` de ese único directorio**: código y datos se van juntos y no queda nada en
+ninguna otra parte. El botón de Config → System hace exactamente eso, y pregunta antes.
+
+Con el visor instalado, la pestaña Firmware gana un botón **Ver mapa** junto a *Diff 2 .bin*: marca
+una o varias imágenes, púlsalo y se abren en el visor. Reutiliza la pestaña que ya abrió, así que
+comparar una calibración tras otra no deja un rastro de ventanas.
+
+El visor guarda sus definiciones XDF en el almacén del propio complemento: la placa nunca aprende
+qué es un `.xdf`. Suelta una en el visor una vez y se queda en la placa, de modo que un *Ver mapa*
+posterior dibuja los mapas de inmediato.
 
 ---
 

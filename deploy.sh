@@ -9,8 +9,9 @@
 #
 # Board-side data is out of reach by construction — ECU logs (/root/k-line), firmware
 # images (/root/firmware) and the live config (/etc/onboard-logger) all sit outside
-# DEST — while .venv and bin/5am_util are excluded, which also protects them from
-# --delete.
+# DEST — while .venv, bin/5am_util and addons/ are excluded, which also protects
+# them from --delete. An add-on is installed on the board and holds the rider's
+# own files; a deploy from here has no business replacing either.
 #
 # The board's address and password are NOT in this file: the repository is public.
 # Put them in .deploy.env next to it (git-ignored, see .deploy.env.example), or pass
@@ -48,9 +49,14 @@ else
   RSH="ssh -o StrictHostKeyChecking=no -o ConnectTimeout=8"   # key auth
 fi
 BOARD="$USER_ON_BOARD@$HOST"
-EXCLUDES=(--exclude '.git' --exclude '.venv' --exclude 'bin' --exclude '__pycache__'
+EXCLUDES=(--exclude '.git' --exclude '.venv' --exclude 'bin' --exclude 'addons'
+          --exclude '__pycache__'
           --exclude '*.pyc' --exclude '.claude' --exclude '.remember'
-          --exclude 'old_logs' --exclude '.DS_Store' --exclude 'CONTEXT.md')
+          --exclude 'old_logs' --exclude '.DS_Store' --exclude 'CONTEXT.md'
+          # Dev-host files with no business on the bike. .deploy.env is the one
+          # that matters: it carries the board's own root password, and this
+          # script was copying it into the deployed tree on every run.
+          --exclude '.deploy.env' --exclude 'CLAUDE.md' --exclude 'HANDOFF.md')
 
 if [ "$RUN_TESTS" -eq 1 ]; then
   log "offline test suite (skip with --no-tests)"

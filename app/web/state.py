@@ -21,6 +21,12 @@ class State:
         self.wifi_mode = "ap"          # ap | client — which side owns the radio
         self.wifi_link: dict = {}      # client mode: {associated, ssid, signal, ip}
         self.bus_baud = 0             # K-Line baud currently in use / being tried
+        # board health, refreshed by a task of its own so it is there whether or
+        # not the ECU link is up: the header shows the temperature at all times
+        self.cpu_temp = 0.0           # C, 0 = not readable (dev host)
+        self.cpu_trip = 0.0           # C at the first passive thermal trip
+        self.cpu_mhz = 0
+        self.cpu_gov = ""
         self.values: dict[str, float | None] = {}
         self.values_ts = 0.0          # wall-clock of last measurement
         self.poll_hz = 0.0
@@ -43,7 +49,11 @@ class State:
         self.selected: list[str] = []  # channel keys the UI shows live
         # three named channel sets the Logger tab switches between; which one is
         # "active" is never stored — the UI derives it by comparing sets
-        self.presets: list[dict] = [{"name": "", "keys": []} for _ in range(3)]
+        self.presets: list[dict] = [{"name": "", "keys": [], "note": ""}
+                                    for _ in range(3)]
+        # the note for a hand-picked set: which preset is "active" is derived
+        # from the live selection, so a set matching none of them has no slot
+        self.free_note: str = ""
         self.catalog: list[dict] = []  # [{key,name,unit}, ...]
         # rli-scan (bus sweep) status
         self.scan_on = False
@@ -100,6 +110,15 @@ class State:
         with self._lock:
             self.wifi_mode = mode
             self.wifi_link = dict(link or {})
+
+    def set_cpu(self, st: dict) -> None:
+        """Take what system.cpu_status() found. A board with no cpufreq simply
+        leaves the fields at zero and the UI hides the row."""
+        with self._lock:
+            self.cpu_temp = float(st.get("temp_c", 0) or 0)
+            self.cpu_trip = float(st.get("trip_c", 0) or 0)
+            self.cpu_mhz = int((st.get("cur_khz", 0) or 0) / 1000)
+            self.cpu_gov = str(st.get("governor", "") or "")
 
     def set_bus_baud(self, baud: int) -> None:
         with self._lock:
@@ -202,10 +221,13 @@ class State:
         with self._lock:
             self.selected = list(keys)
 
-    def set_presets(self, presets: list[dict]) -> None:
+    def set_presets(self, presets: list[dict], free_note: str | None = None) -> None:
         with self._lock:
             self.presets = [{"name": str(p.get("name", "")),
-                             "keys": list(p.get("keys", []))} for p in presets]
+                             "keys": list(p.get("keys", [])),
+                             "note": str(p.get("note", ""))} for p in presets]
+            if free_note is not None:
+                self.free_note = str(free_note)
 
     # -- reader ------------------------------------------------------------
     def snapshot(self) -> dict:
@@ -223,6 +245,10 @@ class State:
                 "wifi_mode": self.wifi_mode,
                 "wifi_link": dict(self.wifi_link),
                 "bus_baud": self.bus_baud,
+                "cpu_temp": self.cpu_temp,
+                "cpu_trip": self.cpu_trip,
+                "cpu_mhz": self.cpu_mhz,
+                "cpu_gov": self.cpu_gov,
                 "values": dict(self.values),
                 "values_ts": self.values_ts,
                 "poll_hz": self.poll_hz,
@@ -239,8 +265,10 @@ class State:
                 "log_raw_records": self.log_raw_records,
                 "selected": list(self.selected),
                 # copied, not referenced: the UI edits what it is handed
-                "presets": [{"name": p["name"], "keys": list(p["keys"])}
+                "presets": [{"name": p["name"], "keys": list(p["keys"]),
+                             "note": p.get("note", "")}
                             for p in self.presets],
+                "free_note": self.free_note,
                 "catalog": list(self.catalog),
                 "scan_on": self.scan_on,
                 "scan_sweeps": self.scan_sweeps,

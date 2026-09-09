@@ -100,6 +100,18 @@ a { color: var(--info); }
   background: var(--surface); border-bottom: 1px solid var(--border);
 }
 .brand { font-weight: 700; font-size: 16px; letter-spacing: .2px; }
+/* Centred between the brand and the status pill. flex:1 rather than absolute
+   positioning: on a 320 px phone the three have to share the bar, not overlap. */
+.cputemp {
+  flex: 1; min-width: 0; text-align: center;
+  font-size: 13px; font-weight: 600; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cputemp.is-hot { color: var(--danger); }
+body.is-stale .cputemp { opacity: .45; }
+/* Three things now share the bar. Below 560 px the wordmark goes and the 🏍️
+   still names the page, which is what the landscape query already does. */
+@media (max-width: 560px) { .brand__text { display: none; } }
 .pill {
   display: inline-flex; align-items: center; gap: 7px;
   padding: 5px 11px; border-radius: 999px; font-size: 12px; font-weight: 600;
@@ -519,6 +531,12 @@ label.is-dirty input, label.is-dirty select { border-color: var(--warn); }
 .board-logs .lname { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
 .board-logs .logrow .mini { min-height: 28px; padding: 0 10px; font-size: 12px; flex: none; }
 .board-logs .lmeta { flex: none; }
+/* The diagnostics switch and its size limit on one line: the switch takes the
+   room, the number needs only a field's worth. Wraps on a narrow phone. */
+.diag-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.diag-row > label.inline:first-child { flex: 1 1 auto; }
+.diag-row .diag-lim { flex: 0 0 auto; color: var(--muted); font-size: 13px; font-weight: 500; }
+.diag-row .diag-lim input { margin-top: 0; width: 96px; min-height: 38px; font-size: 15px; }
 
 .icon-del {
   width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
@@ -740,6 +758,15 @@ body.is-stale .tps-val, body.is-stale #decMeta, body.is-stale #rawMeta { color: 
 body.is-stale .prow .spark { opacity: .35; }
 body.is-stale .ecu-banner { filter: grayscale(1); }
 
+/* .cpu-box rides .update-box for the frame and, crucially, for position:
+   relative -- the pill title is absolute, and without a positioned parent it
+   climbed out of the block and landed on the System legend. */
+/* two selects side by side until the screen runs out; shared by Processor and
+   Appearance, which both pair a choice with a choice */
+.cpu-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.cpu-row label { flex: 1 1 160px; }
+#cpuNow.is-hot { color: var(--danger); }
+
 /* ---------- config: pending network changes ---------- */
 .dirty-bar {
   position: sticky; z-index: 15; bottom: calc(10px + env(safe-area-inset-bottom));
@@ -808,3 +835,62 @@ body.is-stale .ecu-banner { filter: grayscale(1); }
 }
 /* the sticky bar floats over what follows it — give the Power card room to clear */
 .dirty-bar:not([hidden]) ~ .card.danger { margin-bottom: 76px; }
+
+/* The file input stays in the layout, just out of sight. `hidden` (display:none)
+   is what iOS declines to open from a label, and `accept` is worse: extensions
+   there resolve through UTIs, so `.bin` greys out every firmware image. The
+   extension is checked in JS instead — see pickedFile() in app.js. */
+.file-pick {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* The preset note. Rendered markdown in read mode, a textarea in pick — one
+   block either way, so the card does not jump when the mode changes. */
+.preset-note { margin: 10px 0 0; }
+.preset-note__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.preset-note__count { margin-left: auto; font-variant-numeric: tabular-nums; }
+.preset-note__view { font-size: 13px; line-height: 1.45; word-break: break-word; }
+.preset-note__view > :first-child { margin-top: 0; }
+.preset-note__view > :last-child { margin-bottom: 0; }
+.preset-note__view p { margin: .4em 0; }
+.preset-note__view h3, .preset-note__view h4, .preset-note__view h5,
+.preset-note__view h6 { margin: .7em 0 .3em; font-size: 13px; }
+.preset-note__view ul, .preset-note__view ol { margin: .4em 0; padding-left: 1.4em; }
+.preset-note__view li { margin: .15em 0; }
+.preset-note__view code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  padding: 0 .25em;
+  border-radius: 3px;
+  background: var(--chip, rgba(127, 127, 127, .18));
+}
+.preset-note__view hr { border: 0; border-top: 1px solid var(--line); margin: .6em 0; }
+.preset-note__edit {
+  width: 100%;
+  min-height: 88px;
+  resize: vertical;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+}
+/* a phone in landscape has almost no height to spare */
+@media (max-height: 500px) {
+  .preset-note__edit { min-height: 56px; }
+}

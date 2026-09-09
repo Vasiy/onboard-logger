@@ -47,6 +47,16 @@ class Param:
     # ("enum" = exact value lookup, "bits" = every set bit listed).
     map: str = ""
     map_type: str = ""
+    # The firmware answers this rli from a shared placeholder slot -- 34 of the 79
+    # share three of them -- so it is a constant zero by construction, not a channel
+    # whose condition we have yet to catch. Such a row is never offered for
+    # selection: it would cost a request per poll cycle and log a column of zeros.
+    # It stays in this file because the rli is real and the record is the map.
+    dead: bool = False
+    # Names a value the board works out from other channels rather than asks the
+    # ECU for -- the gear, which falls out of rpm and road speed. It is selectable
+    # and logged like any other column; the worker just does not poll its rli.
+    derived: str = ""
 
     @property
     def with_addr(self) -> bool:
@@ -97,6 +107,13 @@ class ParamMap:
         return [
             {"key": p.key, "name": p.name, "unit": p.unit, "default": p.default,
              "group": p.group or ("known" if p.default else "unknown"),
-             "rli": p.rli, "map": p.map, "map_type": p.map_type}
+             "rli": p.rli, "map": p.map, "map_type": p.map_type, "dead": p.dead,
+             "derived": p.derived}
             for p in self.params
         ]
+
+    def selectable(self) -> set[str]:
+        """Keys a selection may name. The single answer to "can this be polled",
+        so a dead rli cannot arrive through a preset, a stored selection or the
+        API and quietly cost a request per cycle."""
+        return {p.key for p in self.params if not p.dead}

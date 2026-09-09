@@ -9,6 +9,56 @@ const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+// A very small markdown subset for the preset notes, and nothing more: headings,
+// bold, italic, inline code, bullet and numbered lists, a rule, line breaks.
+//
+// esc() runs FIRST and the markup is built out of the escaped text afterwards.
+// Reversed, a note would be a way to put arbitrary HTML into the board's own
+// origin — the notes are typed by whoever holds the phone, but they are also
+// what an imported presets.json carries.
+//
+// Links are left out on purpose: the bike has no route to the internet, so an
+// <a> would lead nowhere and is only more surface.
+function mdToHtml(src) {
+  const lines = String(src ?? "").replace(/\r\n?/g, "\n").split("\n");
+  const out = [];
+  let list = null;                       // "ul" | "ol" | null
+
+  const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
+  const openList = (kind) => {
+    if (list !== kind) { closeList(); out.push(`<${kind}>`); list = kind; }
+  };
+
+  // inline runs on already-escaped text, so `**` cannot smuggle a tag in
+  const inline = (text) => esc(text)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
+
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    let m;
+    if (!line.trim()) { closeList(); continue; }
+    if (/^\s*([-*_])\1{2,}\s*$/.test(line)) { closeList(); out.push("<hr>"); continue; }
+    if ((m = /^(#{1,3})\s+(.*)$/.exec(line))) {
+      closeList();
+      const h = Math.min(m[1].length + 2, 6);       // # is a note heading, not a page one
+      out.push(`<h${h}>${inline(m[2])}</h${h}>`);
+      continue;
+    }
+    if ((m = /^\s*[-*+]\s+(.*)$/.exec(line))) {
+      openList("ul"); out.push(`<li>${inline(m[1])}</li>`); continue;
+    }
+    if ((m = /^\s*\d+[.)]\s+(.*)$/.exec(line))) {
+      openList("ol"); out.push(`<li>${inline(m[1])}</li>`); continue;
+    }
+    closeList();
+    out.push(`<p>${inline(line)}</p>`);
+  }
+  closeList();
+  return out.join("");
+}
+
 // ---------- i18n ----------
 let LOCALE = "en";
 let T = window.I18N.en;
@@ -60,7 +110,7 @@ async function api(path, opts) {
       detail = body.detail || "";
     } catch (e) {}
     const err = new Error(msg);
-    err.detail = detail;      // what the board actually said, e.g. "нет sfdisk"
+    err.detail = detail;      // what the board actually said, e.g. "no sfdisk"
     throw err;
   }
   return r.status === 204 ? null : r.json();
@@ -317,6 +367,26 @@ const spark = {};
 const SPARK_MS = 3000;
 const isLoggerActive = () => $("#tab-logger").classList.contains("is-active");
 
+// Channels whose sparkline gets a fixed window instead of auto-scaling to
+// whatever it happens to hold. A coolant sensor drifting by tenths otherwise
+// fills the whole height and reads as a wild swing — the line says "something
+// is happening" when nothing is. The value is the half-window in the channel's
+// own unit, so ±3 °C here.
+const FIXED_SPAN = { air_t: 3, coolant_t: 3 };
+
+// Centred on the newest reading, so the scale never changes and the trace stays
+// where the eye expects it: a warm-up slides through the window instead of
+// climbing off the top and stretching the range behind it. Nothing is
+// remembered between frames — the window is a property of the value on screen,
+// not of the session, which is why a reconnect or a new log needs no handling.
+function fixedSpan(key) {
+  const d = FIXED_SPAN[key];
+  if (!d) return null;
+  const hist = spark[key];
+  const v = hist && hist.length ? hist[hist.length - 1][1] : null;
+  return Number.isFinite(v) ? { mn: v - d, mx: v + d } : null;
+}
+
 function pushSpark(values) {
   const now = performance.now();
   (catalog || []).forEach((ch) => {
@@ -330,11 +400,12 @@ function pushSpark(values) {
 
 function drawSparks() {
   $$("#params .prow").forEach((row) =>
-    drawSpark(row.querySelector(".spark"), spark[row.dataset.key] || [], row.classList.contains("off"))
+    drawSpark(row.querySelector(".spark"), spark[row.dataset.key] || [],
+              row.classList.contains("off"), fixedSpan(row.dataset.key))
   );
 }
 
-function drawSpark(cv, hist, off) {
+function drawSpark(cv, hist, off, span) {
   if (!cv) return;
   const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
   if (w < 2 || h < 2) return;
@@ -343,9 +414,12 @@ function drawSpark(cv, hist, off) {
   if (hist.length < 2) return;
   let mn = Infinity, mx = -Infinity;
   for (const p of hist) { if (p[1] < mn) mn = p[1]; if (p[1] > mx) mx = p[1]; }
-  const span = (mx - mn) || 1, t1 = hist[hist.length - 1][0], pad = 2;
+  // the fixed window only ever widens: a temperature that really leaves it is
+  // the one thing worth seeing, and clipping the line would hide exactly that
+  if (span) { mn = Math.min(span.mn, mn); mx = Math.max(span.mx, mx); }
+  const range = (mx - mn) || 1, t1 = hist[hist.length - 1][0], pad = 2;
   const px = (t) => pad + ((t - (t1 - SPARK_MS)) / SPARK_MS) * (w - 2 * pad);
-  const py = (v) => h - pad - ((v - mn) / span) * (h - 2 * pad);
+  const py = (v) => h - pad - ((v - mn) / range) * (h - 2 * pad);
   ctx.strokeStyle = cssVar("--info") || "#3aa0ff"; ctx.globalAlpha = off ? 0.5 : 1; ctx.lineWidth = 1.25;
   ctx.beginPath();
   hist.forEach((p, i) => { const X = px(p[0]), Y = py(p[1]); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
@@ -417,8 +491,23 @@ let presetSig = "";              // the JSON the buttons were drawn from
 let editIdx = -1;                // slot open for editing (pick mode only)
 let lastIdx = -1;
 let presetsPending = false;      // a local write is in flight — ignore the push
+const NOTE_MAX = 4096;           // the board trims to the same figure
+let freeNote = "";               // the note for a set that matches no preset
 
 const presetName = (p, i) => p.name || "preset" + (i + 1);
+
+// Which note the block is showing. A slot open for editing wins — the field then
+// belongs to the same slot as the name and the ticks, so there is one rule for
+// all three. Otherwise it is the lit preset's, and failing that the free one: a
+// hand-picked set has no slot, because which preset is "active" is derived from
+// the selection rather than stored.
+function noteTarget() {
+  if (paramMode === "edit" && editIdx >= 0) return editIdx;
+  if (!presets) return -1;
+  return presets.findIndex((p) => p.keys.length && sameSet(selectedKeys, p.keys));
+}
+
+const noteText = (i) => (i >= 0 && presets ? presets[i].note || "" : freeNote);
 const sameSet = (set, keys) => set.size === keys.length && keys.every((k) => set.has(k));
 
 // What a set costs, in the unit the card header already shows. One 0x21 request
@@ -518,6 +607,35 @@ function renderPresets() {
     $("#presetName").value = presets[editIdx].name;
   }
   renderPresetCost();
+  renderPresetNote();
+}
+
+function renderPresetNote() {
+  const box = $("#presetNote");
+  if (!box) return;
+  const editing = paramMode === "edit";
+  const i = noteTarget();
+  const text = noteText(i);
+  // read mode with nothing written: no empty box taking up the card
+  box.hidden = !editing && !text.trim();
+  if (box.hidden) return;
+
+  const view = $("#presetNoteView"), ed = $("#presetNoteEdit");
+  view.hidden = editing;
+  ed.hidden = !editing;
+  // say whose note this is, so a slot open for editing is not mistaken for the
+  // set currently on screen
+  $("#presetNoteWho").textContent =
+    i >= 0 && presets ? presetName(presets[i], i) : t("note.free");
+  if (editing) {
+    // never while the rider is typing, and never over a write in flight: the
+    // 0.2 s push would eat the letters
+    if (document.activeElement !== ed && !presetsPending) ed.value = text;
+    $("#presetNoteCount").textContent = String(NOTE_MAX - ed.value.length);
+  } else {
+    view.innerHTML = mdToHtml(text);
+    $("#presetNoteCount").textContent = "";
+  }
 }
 
 async function onPresetClick(i) {
@@ -552,9 +670,10 @@ async function savePresets() {
   try {
     const r = await api("/api/presets", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ presets }),
+      body: JSON.stringify({ presets, free_note: freeNote }),
     });
     if (r && r.presets) { presets = r.presets; presetSig = JSON.stringify(r.presets); }
+    if (r && typeof r.free_note === "string") freeNote = r.free_note;
   } catch (e) {
     toast(t("preset.saveFail"), "err");
   } finally {
@@ -571,6 +690,15 @@ $("#presetName").addEventListener("input", (e) => {
 // the write goes out on blur/Enter rather than per keystroke
 $("#presetName").addEventListener("change", () => savePresets());
 
+$("#presetNoteEdit").addEventListener("input", (e) => {
+  const v = String(e.target.value || "").slice(0, NOTE_MAX);
+  const i = noteTarget();
+  if (i >= 0 && presets) presets[i].note = v; else freeNote = v;
+  $("#presetNoteCount").textContent = String(NOTE_MAX - v.length);
+});
+// blur, not per keystroke — the same rule the preset name follows
+$("#presetNoteEdit").addEventListener("change", () => savePresets());
+
 // ---------- appearance ----------
 // Device-local, not board config: the same board is read in sunlight and at night.
 function applyTheme(v) {
@@ -584,6 +712,80 @@ $("#themeSelect")?.addEventListener("change", (e) => {
   try { localStorage.setItem("theme", v); } catch (err) {}
   applyTheme(v);
 });
+
+
+// ---------- keep the phone awake ----------
+// Third device-local preference, beside paramMode and theme: it belongs to the
+// phone in the cradle, not to the motorcycle, so it never travels to /api/config.
+//
+// navigator.wakeLock needs a secure context and the board serves plain HTTP over
+// its own AP, so on the bike the API is simply absent. The fallback is the
+// NoSleep.js trick: a muted inline clip on a loop, which the platform counts as
+// playback and therefore keeps the screen lit. A GIF cannot do this -- an
+// animated image is not playback and does not touch the sleep timer.
+const WAKE_CLIP = "data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMRbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAA+gAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAjt0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAA+gAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAIAAAACAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAPoAAAAAAABAAAAAAGzbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAAAQABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABXm1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAR5zdGJsAAAAunN0c2QAAAAAAAAAAQAAAKphdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAIAAgBIAAAASAAAAAAAAAABFUxhdmM2Mi4yOC4xMDAgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAAMGF2Y0MBQsAe/+EAGGdCwB7ZH4iIwEQAAAMABAAAAwAIPFi5IAEABWjLg8sgAAAAEHBhc3AAAAABAAAAAQAAABRidHJ0AAAAAAAAFDAAAAAAAAAAGHN0dHMAAAAAAAAAAQAAAAEAAEAAAAAAHHN0c2MAAAAAAAAAAQAAAAEAAAABAAAAAQAAABRzdHN6AAAAAAAAAoYAAAABAAAAFHN0Y28AAAAAAAAAAQAAA0EAAABidWR0YQAAAFptZXRhAAAAAAAAACFoZGxyAAAAAAAAAABtZGlyYXBwbAAAAAAAAAAAAAAAAC1pbHN0AAAAJal0b28AAAAdZGF0YQAAAAEAAAAATGF2ZjYyLjEyLjEwMAAAAAhmcmVlAAACjm1kYXQAAAJwBgX//2zcRem95tlIt5Ys2CDZI+7veDI2NCAtIGNvcmUgMTY1IHIzMjIyIGIzNTYwNWEgLSBILjI2NC9NUEVHLTQgQVZDIGNvZGVjIC0gQ29weWxlZnQgMjAwMy0yMDI1IC0gaHR0cDovL3d3dy52aWRlb2xhbi5vcmcveDI2NC5odG1sIC0gb3B0aW9uczogY2FiYWM9MCByZWY9MyBkZWJsb2NrPTE6MDowIGFuYWx5c2U9MHgxOjB4MTExIG1lPWhleCBzdWJtZT03IHBzeT0xIHBzeV9yZD0xLjAwOjAuMDAgbWl4ZWRfcmVmPTEgbWVfcmFuZ2U9MTYgY2hyb21hX21lPTEgdHJlbGxpcz0xIDh4OGRjdD0wIGNxbT0wIGRlYWR6b25lPTIxLDExIGZhc3RfcHNraXA9MSBjaHJvbWFfcXBfb2Zmc2V0PS0yIHRocmVhZHM9MSBsb29rYWhlYWRfdGhyZWFkcz0xIHNsaWNlZF90aHJlYWRzPTAgbnI9MCBkZWNpbWF0ZT0xIGludGVybGFjZWQ9MCBibHVyYXlfY29tcGF0PTAgY29uc3RyYWluZWRfaW50cmE9MCBiZnJhbWVzPTAgd2VpZ2h0cD0wIGtleWludD0yNTAga2V5aW50X21pbj0xIHNjZW5lY3V0PTQwIGludHJhX3JlZnJlc2g9MCByY19sb29rYWhlYWQ9NDAgcmM9Y3JmIG1idHJlZT0xIGNyZj0yMy4wIHFjb21wPTAuNjAgcXBtaW49MCBxcG1heD02OSBxcHN0ZXA9NCBpcF9yYXRpbz0xLjQwIGFxPTE6MS4wMACAAAAADmWIhAV///8PRQABQt+A";
+let wakeLockObj = null;      // the real API, when there is one
+let wakeVideo = null;        // the fallback element
+let wakeWanted = false;
+
+const wakeSupported = () => "wakeLock" in navigator;
+
+function wakeVideoEl() {
+  if (wakeVideo) return wakeVideo;
+  const v = document.createElement("video");
+  v.setAttribute("playsinline", "");      // or iOS takes the clip fullscreen
+  v.setAttribute("webkit-playsinline", "");
+  v.muted = true; v.loop = true; v.src = WAKE_CLIP;
+  // rendered, not display:none -- a hidden element is not playing as far as the
+  // platform is concerned, which is the same reason the file inputs are off-screen
+  v.style.cssText = "position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;left:-1px;top:-1px";
+  document.body.appendChild(v);
+  wakeVideo = v;
+  return v;
+}
+
+async function wakeAcquire() {
+  if (!wakeWanted) return;
+  if (wakeSupported()) {
+    try {
+      wakeLockObj = await navigator.wakeLock.request("screen");
+      wakeLockObj.addEventListener("release", () => { wakeLockObj = null; });
+      return;
+    } catch (e) { /* denied or gone -- fall through to the clip */ }
+  }
+  try { await wakeVideoEl().play(); } catch (e) { /* needs a gesture; the next tap arms it */ }
+}
+
+function wakeRelease() {
+  if (wakeLockObj) { try { wakeLockObj.release(); } catch (e) {} wakeLockObj = null; }
+  if (wakeVideo) { try { wakeVideo.pause(); } catch (e) {} }
+}
+
+function setWake(on) {
+  wakeWanted = on;
+  try { localStorage.setItem("wakeLock", on ? "1" : "0"); } catch (e) {}
+  const box = $("#wakeToggle");
+  if (box) box.checked = on;
+  if (on) wakeAcquire(); else wakeRelease();
+}
+
+// Both paths are lost on the way back from a locked screen or another app, and
+// neither says so -- re-taking it on every return is the whole of keeping it.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && wakeWanted) wakeAcquire();
+});
+// Playback will not start without a gesture, so a page that loads with the
+// preference already on waits for the first touch anywhere.
+["pointerdown", "keydown"].forEach((ev) =>
+  document.addEventListener(ev, () => { if (wakeWanted) wakeAcquire(); }, { passive: true }));
+
+$("#wakeToggle")?.addEventListener("change", (e) => setWake(e.target.checked));
+
+function initWake() {
+  let saved = "0";
+  try { saved = localStorage.getItem("wakeLock") || "0"; } catch (e) {}
+  setWake(saved === "1");
+}
 
 function logMeta(armed, file, records) {
   if (file) return `${t("rec.writing")}: ${file} · ${records || 0} ${t("rec.records")}`;
@@ -613,10 +815,34 @@ setInterval(() => {
   if (lastSnapAt && performance.now() - lastSnapAt > STALE_MS) setStale(true);
 }, 500);
 
+// The board runs in a closed case with no fan and idles about 5 C under the
+// first passive thermal trip, past which the kernel cuts the clock by itself.
+// So the header shows the headroom, not just the number: 64.6 C means nothing
+// without knowing that 70 is where it starts throttling.
+function renderCpuTemp(s) {
+  const el = $("#cpuTemp");
+  if (!el) return;
+  const t_ = Number(s.cpu_temp) || 0;
+  if (!t_) { el.hidden = true; return; }        // dev host: no thermal zone
+  const trip = Number(s.cpu_trip) || 0;
+  const head = trip ? trip - t_ : 0;
+  el.hidden = false;
+  // temperature and clock together: on this board the two move against each
+  // other -- past the trip the kernel drops the clock to buy the degrees back,
+  // and seeing 81° next to 408 MHz says "throttling" at a glance
+  el.textContent = `${t_.toFixed(1)}°` + (s.cpu_mhz ? ` · ${s.cpu_mhz}\u00a0MHz` : "");
+  el.classList.toggle("is-hot", !!trip && head <= 0);
+  const parts = [`${t_.toFixed(1)} °C`];
+  if (trip) parts.push(t("cfg.cpuHeadroom").replace("%d", head.toFixed(1)) + ` (${trip} °C)`);
+  if (s.cpu_mhz) parts.push(`${s.cpu_mhz} MHz${s.cpu_gov ? " " + s.cpu_gov : ""}`);
+  el.title = parts.join(" · ");
+}
+
 function applySnapshot(s) {
   lastSnapshot = s;
   lastSnapAt = performance.now();
   setStale(false);
+  renderCpuTemp(s);
   $("#statusPill").className = "pill pill--" + s.status;
   if (s.status === "connected") {                 // short pill: ecu:<model> hw:<hw> connected
     const m = (s.ecu_hw || "").match(/^(.*?)(HW\d+)$/);
@@ -691,14 +917,20 @@ function applySnapshot(s) {
   renderWifiStatus(s);
 
   if (!catalog.length && s.catalog.length) {
-    catalog = s.catalog;
+    // A dead rli is dropped here rather than in each list: the firmware answers it
+    // from a shared placeholder slot, so it can only ever log a column of zeros and
+    // cost a request per cycle. Nothing downstream — lists, tiles, cost estimate —
+    // should know it exists. The board still carries it, the record is params.json.
+    catalog = s.catalog.filter((c) => !c.dead);
     selectedKeys = new Set(s.selected);
     renderParams();
   }
   // the board is the authority on the presets, except while this browser is the
   // one changing them — a half-typed name is a change that has not gone out yet
-  if (s.presets && !presetsPending && document.activeElement !== $("#presetName")) {
+  if (s.presets && !presetsPending && document.activeElement !== $("#presetName")
+      && document.activeElement !== $("#presetNoteEdit")) {
     const sig = JSON.stringify(s.presets);
+    if (typeof s.free_note === "string") freeNote = s.free_note;
     if (sig !== presetSig) { presets = s.presets; presetSig = sig; renderPresets(); }
   }
   updateValues(s.values);
@@ -1060,7 +1292,73 @@ async function loadConfig() {
   cfgLoaded = cfg;
   markNetDirty();
   loadWifiChart();
+  loadCpu();
 }
+
+// ---------- processor: governor and frequency ceiling ----------
+// Its own endpoint on purpose: /api/config drags apply_network along with it,
+// and nothing here may touch the AP the page is served over. The lists come
+// from the board -- this NanoPi NEO3 answers six governors and six frequencies,
+// the next board need not.
+async function loadCpu() {
+  const box = $("#cpuBox");
+  if (!box) return;
+  let d;
+  try { d = await api("/api/system/cpu"); } catch (e) { return; }
+  if (!d.available) { box.hidden = true; return; }   // dev host, no cpufreq
+  box.hidden = false;
+  const fill = (sel, items, cur, label) => {
+    sel.innerHTML = `<option value="">${esc(t("cfg.cpuLeave"))}</option>`
+      + items.map((v) => `<option value="${esc(String(v))}">${esc(label(v))}</option>`).join("");
+    sel.value = cur == null ? "" : String(cur);
+  };
+  // the stored choice, not the live value: an empty box means "leave it alone",
+  // and the live governor is shown in the line above instead
+  const cfg = cfgLoaded || {};
+  const want = ((cfg.system || {}).cpu) || {};
+  fill($("#cpuGov"), d.governors, want.governor || "", (v) => v);
+  fill($("#cpuMax"), d.freqs_khz, want.max_khz || "", (v) => `${Math.round(v / 1000)} MHz`);
+  renderCpuNow(d);
+}
+
+function renderCpuNow(d) {
+  const el = $("#cpuNow");
+  if (!el) return;
+  const parts = [];
+  if (d.temp_c) {
+    parts.push(`${d.temp_c} °C`);
+    if (d.trip_c) parts.push(t("cfg.cpuHeadroom").replace("%d", (d.trip_c - d.temp_c).toFixed(1)));
+  }
+  if (d.cur_khz) parts.push(`${Math.round(d.cur_khz / 1000)} MHz`);
+  // The thermal governor drives scaling_max_freq as well, so the live ceiling
+  // can sit under the hardware maximum with nothing in config asking for it.
+  // Saying so is the difference between "the board is slow" and "it is capped".
+  if (d.max_khz && d.hw_max_khz && d.max_khz < d.hw_max_khz) {
+    parts.push(t("cfg.cpuCapped").replace("%d", Math.round(d.max_khz / 1000)));
+  }
+  if (d.governor) parts.push(d.governor);
+  el.textContent = parts.join(" · ") || "—";
+  el.classList.toggle("is-hot", !!(d.trip_c && d.temp_c && d.temp_c >= d.trip_c));
+}
+
+async function saveCpu() {
+  const gov = $("#cpuGov").value;
+  const mx = Number($("#cpuMax").value) || 0;
+  try {
+    // api() hands opts straight to fetch, so the method and the body are ours to
+    // build -- passing the payload alone sent a GET and read back a status with
+    // no ok in it, which looked exactly like a refusal
+    const d = await api("/api/system/cpu", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ governor: gov, max_khz: mx }),
+    });
+    if (d.ok) { renderCpuNow(d); toast(t("cfg.saved"), "ok"); }
+    else toast(d.message || t("cfg.cpuFailed"), "warn");
+  } catch (e) { toast(String(e.message || e), "warn"); }
+}
+
+$("#cpuGov")?.addEventListener("change", saveCpu);
+$("#cpuMax")?.addEventListener("change", saveCpu);
 
 // ---------- Wi-Fi mode (access point <-> client) ----------
 // The visible controls are a plain toggle (AP on the left, Client on the right)
@@ -1512,21 +1810,14 @@ function makeLogBrowser(o) {
       ? o.zipPrefix + fullDays.sort((a, b) => (dayKey(a) < dayKey(b) ? -1 : 1)).map(dayKey).join("-") + ".zip"
       : o.zipPrefix + dayKey(logDay({ mtime: Date.now() / 1000 })) + ".zip";
 
+    // one file out of a day goes straight: /api/logs/<name> already answers
+    // with Content-Disposition, so there is nothing to bundle
     if (sel.length === 1 && partial) {
-      const f = S.rows.find((x) => x.name === sel[0]);
-      saveBlobAs(logUrl(sel[0]), (f && f.file) || sel[0]);
+      downloadUrl(logUrl(sel[0]));
       return;
     }
-    try {
-      const r = await fetch("/api/logs/download", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ names: sel, zipname }),
-      });
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      const url = URL.createObjectURL(await r.blob());
-      saveBlobAs(url, zipname);
-      setTimeout(() => URL.revokeObjectURL(url), 4000);
-    } catch (err) { toastErr(err); }
+    downloadUrl("/api/logs/download?names=" + encodeURIComponent(sel.join(","))
+      + "&zipname=" + encodeURIComponent(zipname));
   }
 
   async function remove() {
@@ -1566,10 +1857,25 @@ function makeLogBrowser(o) {
   return { load, render, rows: () => S.rows, checked };
 }
 
-function saveBlobAs(blobOrUrl, filename) {
-  const a = document.createElement("a");
-  a.href = blobOrUrl; a.download = filename;
-  document.body.appendChild(a); a.click(); a.remove();
+// Safari on iOS ignores the download attribute on a synthesized anchor and
+// refuses to save a blob: URL outright, so the old saveBlobAs() handed an
+// iPhone nothing at all -- and a loop over several anchors delivered at most
+// the first even where it worked. Navigating to a URL that answers with
+// Content-Disposition is the one shape every browser saves, which is why the
+// server now does the bundling (GET /api/logs/download, /api/firmware/download).
+function downloadUrl(url) { window.location.href = url; }
+
+// The picker carries no accept filter, because iOS resolves extensions through
+// UTIs and greys out every .bin under one. So the check lives here: the input
+// is always cleared, and a wrong pick says so instead of being uploaded.
+function pickedFile(input, exts) {
+  const file = input.files && input.files[0];
+  input.value = "";
+  if (!file) return null;
+  const name = String(file.name || "").toLowerCase();
+  if (exts.some((x) => name.endsWith(x))) return file;
+  toast(t("files.wrongType") + " " + exts.join(", "), "err");
+  return null;
 }
 
 // ---------- the two instances ----------
@@ -2210,13 +2516,92 @@ $("#fwWriteSelect").addEventListener("change", () => { loadWriteDesc(); checkWri
 const fwChecked = () => [...document.querySelectorAll("#fwList .fwsel:checked")].map((c) => c.value);
 
 $("#fwDownloadBtn").addEventListener("click", () => {
-  fwChecked().forEach((n) => {
-    const a = document.createElement("a");
-    a.href = "/api/firmware/files/" + encodeURIComponent(n);
-    a.download = n;
-    document.body.appendChild(a); a.click(); a.remove();
-  });
+  const names = fwChecked();
+  const res = $("#fwDiffResult");
+  if (!names.length) { res.textContent = t("fw.selectOne"); return; }
+  // one navigation whatever the count: the board returns the image itself for
+  // a single pick and a zip -- descriptions included -- for several
+  downloadUrl("/api/firmware/download?names=" + encodeURIComponent(names.join(",")));
 });
+// The map viewer runs as an add-on. The button appears only when one is
+// installed that can draw a firmware image, and the selection it works on is
+// the same one Download and Diff use.
+let mapsAddon = null;
+
+let addonsList = [];
+
+async function loadAddons() {
+  try {
+    const r = await api("/api/addons");
+    addonsList = r.addons || [];
+  } catch (e) { addonsList = []; }
+  mapsAddon = addonsList.find((a) => a.name === "maps") || null;
+  $("#fwMapBtn").hidden = !mapsAddon;
+  renderAddons();
+}
+
+function renderAddons() {
+  const box = $("#addonList");
+  if (!box) return;
+  box.innerHTML = "";
+  if (!addonsList.length) {
+    box.innerHTML = `<p class="hint">${t("addon.none")}</p>`;
+    return;
+  }
+  addonsList.forEach((a) => {
+    const row = document.createElement("div");
+    row.className = "fwrow";
+    row.innerHTML =
+      `<span></span>` +
+      `<span class="fw-file__cell"><a class="fw-file__name" href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.title || a.name)}</a>` +
+      `<span class="hint">${esc(a.version ? "v" + a.version : "")} · ${a.files} ${esc(t("addon.files"))}</span></span>` +
+      `<span class="col-date"></span>` +
+      `<span class="col-size"><button type="button" class="mini mini--danger" data-rm="${esc(a.name)}">${esc(t("addon.remove"))}</button></span>`;
+    box.appendChild(row);
+  });
+  box.querySelectorAll("[data-rm]").forEach((b) =>
+    b.addEventListener("click", (e) => withBusy(e.currentTarget, async () => {
+      const name = b.dataset.rm;
+      // the store goes with the code, so this is not an undo-able tidy-up
+      if (!(await confirmDialog(t("addon.confirmRemove") + " " + name,
+        { danger: true, okLabel: t("addon.remove") }))) return;
+      try {
+        await api("/api/addons/" + encodeURIComponent(name), { method: "DELETE" });
+        toast(t("addon.removed") + " " + name, "ok");
+      } catch (err) { toastErr(err); }
+      loadAddons();
+    }))
+  );
+}
+
+$("#addonUpload").addEventListener("change", async (e) => {
+  const f = pickedFile(e.target, [".tar.gz", ".tgz", ".tar", ".zip"]);
+  if (!f) return;
+  const fd = new FormData();
+  fd.append("file", f, f.name);
+  $("#addonState").textContent = t("addon.installing");
+  try {
+    const r = await api("/api/addons/upload", { method: "POST", body: fd });
+    $("#addonState").textContent = "";
+    toast(t("addon.installed") + " " + r.name, "ok");
+  } catch (err) {
+    $("#addonState").textContent = "";
+    toastErr(err);
+  }
+  loadAddons();
+});
+
+$("#fwMapBtn").addEventListener("click", () => {
+  const names = fwChecked();
+  const res = $("#fwDiffResult");
+  if (!names.length) { res.textContent = t("fw.selectOne"); return; }
+  const q = names.map((n) => "bin=" + encodeURIComponent(n)).join("&");
+  // a named target, so a second press lands in the tab that is already open
+  // instead of piling up windows the rider has to close
+  const win = window.open(mapsAddon.url + "?" + q, "ecu-map-viewer");
+  if (win) win.focus();
+});
+
 $("#fwDiffBtn").addEventListener("click", async () => {
   const names = fwChecked();
   const res = $("#fwDiffResult");
@@ -2436,8 +2821,7 @@ $("#updLogBtn").addEventListener("click", () => {
 });
 
 $("#updUpload").addEventListener("change", async (e) => {
-  const file = e.target.files[0];
-  e.target.value = "";
+  const file = pickedFile(e.target, [".tar.gz", ".tgz", ".tar", ".zip"]);
   if (!file) return;
   // The board restarts itself at the end of this, so it is asked for out loud.
   if (!(await confirmDialog(t("upd.confirm"), { danger: true, okLabel: t("upd.apply") }))) return;
@@ -2456,13 +2840,12 @@ $("#updUpload").addEventListener("change", async (e) => {
 });
 
 $("#fwUpload").addEventListener("change", async (e) => {
-  const file = e.target.files[0];
+  const file = pickedFile(e.target, [".bin", ".zip"]);
   if (!file) return;
   const fd = new FormData();
   fd.append("file", file);
-  try { await api("/api/firmware/upload", { method: "POST", body: fd }); e.target.value = ""; loadFirmware(); }
+  try { await api("/api/firmware/upload", { method: "POST", body: fd }); loadFirmware(); }
   catch (err) {
-    e.target.value = "";
     const msg = err.message === "no_firmware_in_zip" ? t("fw.noFilesInZip")
       : err.message === "bad_zip" ? t("fw.badZip")
       : t("banner.error") + " " + err.message;
@@ -2476,6 +2859,7 @@ async function init() {
   let savedTheme = "auto";
   try { savedTheme = localStorage.getItem("theme") || "auto"; } catch (e) {}
   applyTheme(savedTheme);
+  initWake();
   try { cfg = await api("/api/config"); loc = cfg.locale || "en"; } catch (e) {}
   applyLocale(loc);
   // No battery-backed RTC on the board: offer this browser's clock right away.
@@ -2493,6 +2877,7 @@ async function init() {
   // status maps ride along with the actuator catalog and are needed on the Logger
   // tab too (mapped channels render as text), so fetch them at boot
   loadActuators();
+  loadAddons();
   connectWS();
 }
 init();

@@ -1,0 +1,19 @@
+# Never let USB runtime power management touch anything this board depends on.
+#
+# The dwc2 OTG root hub is the reason this file is not optional. Suspending it
+# deadlocks the resume path — the kworker ends up stuck for good in
+#   msleep -> dwc2_host_exit_clock_gating -> _dwc2_hcd_resume -> hcd_bus_resume
+# — which pins the load average at +1.0 and leaves the bus cycling suspend/resume
+# underneath the adapters. That cycling is what drops an FTDI cable and a Wi-Fi
+# dongle at the same moment mid-ride.
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="1d6b", TEST=="power/control", ATTR{power/control}="on"
+
+# FTDI FT232R — the K-Line cable. A port that disappears in the middle of a
+# firmware write is not recoverable from the phone.
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0403", ATTR{idProduct}=="6001", TEST=="power/control", ATTR{power/control}="on"
+
+# RT5370 WiFi dongle — never autosuspend
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="148f", ATTR{idProduct}=="5370", TEST=="power/control", ATTR{power/control}="on"
+
+# Alcor Micro hub carrying wifi+FTDI — never autosuspend
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="058f", ATTR{idProduct}=="9254", TEST=="power/control", ATTR{power/control}="on"

@@ -25,6 +25,13 @@ const CAT = [
     group: "check", map: "", map_type: "" },
   { key: "r31", name: "rli 0x31", unit: "", rli: 49, default: false, group: "unknown", map: "", map_type: "" },
   { key: "r36", name: "rli 0x36", unit: "", rli: 54, default: false, group: "unknown", map: "", map_type: "" },
+  // The firmware answers these from a shared placeholder slot, so they can only ever
+  // log a column of zeros. They ride in the catalog -- the rli is real -- and must
+  // never reach a list, a fold or a tick.
+  { key: "r38", name: "rli 0x38 (null)", unit: "", rli: 56, default: false, group: "unknown",
+    map: "", map_type: "", dead: true },
+  { key: "r72", name: "Prog counter (null)", unit: "", rli: 114, default: false, group: "unknown",
+    map: "", map_type: "", dead: true },
 ];
 
 const SNAP = (catalog, selected) => ({
@@ -93,6 +100,28 @@ test("the fold still opens by itself when something inside it is ticked", () => 
   sb.applySnapshot(SNAP(CAT, ["r36"]));
   const wrap = rows(sb).find((n) => n.classList.contains("unknown-wrap"));
   assert(wrap.hidden === false, "a ticked unknown rli opens the fold");
+});
+
+test("a dead rli never reaches the list, folded or not", () => {
+  const sb = sandbox();
+  sb.applySnapshot(SNAP(CAT, []));
+  const kids = rows(sb);
+  const wrap = kids.find((n) => n.classList.contains("unknown-wrap"));
+  const everywhere = keysOf(kids).concat(keysOf(wrap.children));
+  assert(!everywhere.includes("r38") && !everywhere.includes("r72"),
+         "a dead channel must not be drawn anywhere, got " + everywhere.join(","));
+  assert(keysOf(wrap.children).join(",") === "r31,r36",
+         "the fold holds the live unknown rli only, got " + keysOf(wrap.children).join(","));
+});
+
+test("a dead rli cannot be ticked even when the board says it is selected", () => {
+  const sb = sandbox();
+  sb.applySnapshot(SNAP(CAT, ["r72"]));          // a stale selected.json naming one
+  const kids = rows(sb);
+  const wrap = kids.find((n) => n.classList.contains("unknown-wrap"));
+  assert(!keysOf(kids).concat(keysOf(wrap.children)).includes("r72"),
+         "a selected dead channel still must not appear");
+  assert(wrap.hidden === true, "and it must not drag the fold open either");
 });
 
 test("a board that predates the split still renders in two piles", () => {

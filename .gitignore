@@ -25,9 +25,12 @@ fw-*.log*
 k-line/
 logs/
 
-# ECU firmware images and their sidecars: private property, ~320 KB each
+# ECU firmware images and their sidecars: private property, ~320 KB each.
+# The definitions that explain them are the same kind of thing — the map-viewer
+# add-on keeps its own under /opt, and no copy belongs in a public repository.
 *.bin
 *.bin.txt
+*.xdf
 *.hex
 *.s19
 firmware/

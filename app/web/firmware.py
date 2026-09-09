@@ -162,7 +162,7 @@ class FirmwareManager:
             if self.op != "idle":
                 raise RuntimeError("busy")
             if not self.available():
-                raise RuntimeError("5am_util не установлен")
+                raise RuntimeError("5am_util is not installed")
             self.op = self.last_op = op
             self.result = ""
             self.progress = ""
@@ -306,8 +306,8 @@ class FirmwareManager:
                     # the node vanishing mid-transfer *is* the failure cause
                     self._v("PORT", "!! %s %s" % (self.port,
                             "disappeared" if not present else "came back"))
-                    self._append("[!] порт %s %s" % (self.port,
-                                 "исчез" if not present else "вернулся"))
+                    self._append("[!] port %s %s" % (self.port,
+                                 "disappeared" if not present else "came back"))
                 prev, last = cur, now
 
     # what is worth quoting out of the ring buffer: the adapter and anything that
@@ -331,19 +331,19 @@ class FirmwareManager:
     def _verdict(self, rc: int, writing: bool) -> str:
         """Empty when the operation really succeeded, else why it did not."""
         if rc != 0:
-            return f"код возврата {rc}" + (f": {self._util_err}" if self._util_err else "")
+            return f"exit code {rc}" + (f": {self._util_err}" if self._util_err else "")
         if self._util_err:
             return self._util_err          # rc lied; the util said what went wrong
         if writing or not self.current:
             return ""
         out = self.fw_dir / self.current   # a read must leave a full image behind
         if not out.is_file():
-            return f"файл {self.current} не создан"
+            return f"file {self.current} was not created"
         size = out.stat().st_size
         if self.fw_size and size != self.fw_size:
-            return f"размер {size} != {self.fw_size}"
+            return f"size {size} != {self.fw_size}"
         if not size:
-            return "прочитано 0 байт"
+            return "read 0 bytes"
         return ""
 
     def _image_facts(self, name: str) -> str:
@@ -395,12 +395,12 @@ class FirmwareManager:
                 prev_logging = worker.logging_state()
                 worker.set_logging_decoded(False)
                 worker.set_logging_raw(False)
-                self._append("[*] запись логов K-Line отключена на время операции")
+                self._append("[*] K-Line logging is off for the length of this operation")
                 paused = worker.request_pause(timeout=10.0)
                 self._v("FW", "worker paused=%d prev_logging=%s"
                         % (int(paused), prev_logging))
                 if not paused:
-                    self._finish("error", "не удалось освободить порт K-Line")
+                    self._finish("error", "could not free the K-Line port")
                     return
                 self._v("USB", self._usb_line())   # after the port was released
             self._append("[*] " + " ".join(cmd))
@@ -442,7 +442,7 @@ class FirmwareManager:
             self._v("FW", "exit rc=%d elapsed=%.1fs" % (rc, time.monotonic() - started))
             failure = self._verdict(rc, confirm)
             if self.result == "cancelled":
-                self._finish("cancelled", "отменено")
+                self._finish("cancelled", "cancelled")
             elif failure:
                 self._v("FW", "verdict " + failure)
                 self._finish("error", failure)
@@ -451,7 +451,7 @@ class FirmwareManager:
                     self._write_desc(self.current)
                     self.last_read = self.current
                 self._fill_bar()
-                self._finish("ok", "готово")
+                self._finish("ok", "done")
         except Exception as exc:  # noqa: BLE001 - surface any failure to the UI
             self._v("FW", "exception %s: %s" % (type(exc).__name__, exc))
             self._finish("error", str(exc))
@@ -503,7 +503,7 @@ class FirmwareManager:
         try:
             text = describe(raw, snap.get("ecu_hw", ""), self.ecu_fields, extra)
             (self.fw_dir / (name + ".txt")).write_bytes(text.encode("ascii", "replace"))
-            self._append("[+] описание ECU сохранено: " + name + ".txt")
+            self._append("[+] ECU description saved: " + name + ".txt")
         except OSError:
             pass
 

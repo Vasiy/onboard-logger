@@ -13,10 +13,11 @@ until the new one has proven itself:
     offline suite -> swap -> detached restart -> a watchdog rolls back if the
     new code never confirms it came up.
 
-Two things live inside DEST but outside git and cannot be rebuilt here (no
-network, no compiler time): ``.venv`` and ``bin/5am_util``. They are moved into
-the new tree, never copied and never deleted — and the rollback script carries
-them back. ``/etc/onboard-logger`` is not touched at all: it wins over ``config/``
+Three things live inside DEST but outside the repository. Two cannot be rebuilt
+here (no network, no compiler time): ``.venv`` and ``bin/5am_util``. The third,
+``addons/``, holds add-ons the rider installed and the files those are keeping —
+none of which came from any release. All three are moved into the new tree, never
+copied and never deleted, and the rollback script carries them back. ``/etc/onboard-logger`` is not touched at all: it wins over ``config/``
 by design, so a swap of /opt must leave the rider's settings alone.
 """
 
@@ -78,8 +79,9 @@ OK=%(ok)s
 rm -rf "$DEST.failed"
 mv "$DEST" "$DEST.failed" 2>/dev/null
 mv "$PREV" "$DEST" || exit 1
-# .venv and bin/5am_util went with the failed tree and cannot be rebuilt offline
-for keep in .venv bin; do
+# .venv and bin/5am_util went with the failed tree and cannot be rebuilt offline;
+# addons/ went with it too and holds files only the rider has
+for keep in .venv bin addons; do
   [ -e "$DEST/$keep" ] || mv "$DEST.failed/$keep" "$DEST/$keep" 2>/dev/null
 done
 rm -f "%(pending)s"
@@ -486,7 +488,7 @@ class UpdateManager:
         Symlinks, not a move: if the tests fail, the running service must still
         have its interpreter and its flasher exactly where they were.
         """
-        for name in (".venv", "bin"):
+        for name in (".venv", "bin", "addons"):
             src = self.dest / name
             dst = self.stage / name
             if src.exists() and not dst.exists():
@@ -499,7 +501,7 @@ class UpdateManager:
         self._set_op("testing")
         py = str(self.py)
         if not Path(py).exists():
-            self._append("[*] нет интерпретатора %s — тесты пропущены" % py)
+            self._append("[*] no interpreter at %s -- tests skipped" % py)
             return ""
         # The import is the gate that matters: it is the failure that takes the
         # web UI down and leaves no way in but ssh.
@@ -529,7 +531,7 @@ class UpdateManager:
                 self._append("[!] %s: %s" % (t.name,
                              (out.strip().splitlines() or [""])[-1][:200]))
                 return "err.update_tests_failed"
-        self._append("[+] тесты пройдены: %d" % len(tests))
+        self._append("[+] tests passed: %d" % len(tests))
         return ""
 
     def _swap(self) -> str:
@@ -539,7 +541,7 @@ class UpdateManager:
         in place is two syscalls wide.
         """
         self._set_op("swapping")
-        for name in (".venv", "bin"):
+        for name in (".venv", "bin", "addons"):
             link = self.stage / name
             if link.is_symlink():
                 link.unlink()
@@ -583,7 +585,7 @@ class UpdateManager:
         if not self._spawn_detached(["systemd-run", "--on-active=%d" % ROLLBACK_AFTER,
                                      "--unit=onboard-logger-rollback",
                                      "/bin/sh", str(script)]):
-            self._append("[*] сторож отката недоступен")
+            self._append("[*] the rollback watchdog is unavailable")
 
     def _restart(self) -> None:
         self._set_op("restarting")
@@ -604,7 +606,7 @@ class UpdateManager:
             except Exception:      # noqa: BLE001 - diagnostics never take a ride down
                 pass
         try:
-            self._append("[*] распаковка " + archive.name)
+            self._append("[*] unpacking " + archive.name)
             key = self._unpack(archive)
             if not key:
                 key = self._content_gate()
@@ -624,9 +626,9 @@ class UpdateManager:
                 self._fail(key)
                 return
             _write_state(self.etc_dir, info)
-            self._append("[+] дерево заменено, предыдущее: " + self.prev.name)
+            self._append("[+] tree swapped, previous: " + self.prev.name)
             self._arm_rollback(info)
-            self._finish("ok", "перезапуск")
+            self._finish("ok", "restarting")
             self._restart()
         except Exception as exc:   # noqa: BLE001 - never leave op stuck at work
             self._v("UPD", "exception %s: %s" % (type(exc).__name__, exc))

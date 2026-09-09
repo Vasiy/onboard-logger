@@ -300,6 +300,33 @@ def test_param_status_map_fields():
     assert m.catalog()[0]["map"] == "motorstate"
 
 
+def test_dead_params_ride_in_the_catalog_but_never_in_a_selection():
+    """A dead rli is one the firmware answers from a shared placeholder slot. The
+    record stays -- the rli is real and params.json is the map -- but nothing may
+    poll it, so ``selectable()`` is what every selection is filtered through."""
+    live = Param(key="rpm", name="RPM", rli=0x30)
+    dead = Param(key="r72", name="Prog counter (null)", rli=0x72, dead=True)
+    m = ParamMap(poll_interval_ms=100, poll_timeout_ms=100, params=[live, dead])
+    cat = {c["key"]: c for c in m.catalog()}
+    assert cat["r72"]["dead"] is True and cat["rpm"]["dead"] is False, cat
+    assert m.selectable() == {"rpm"}, m.selectable()
+    assert Param(key="x", name="x", rli=1).dead is False   # the flag is opt-in
+
+
+def test_a_derived_channel_is_selectable_but_never_polled():
+    """The gear is worked out from rpm and road speed rather than asked for, so
+    it carries no rli worth polling -- but it is a column like any other, which
+    means selectable() has to keep it where dead keeps its own out."""
+    rpm = Param(key="rpm", name="RPM", rli=0x30)
+    gear = Param(key="gear", name="Gear", rli=0, derived="gear")
+    m = ParamMap(poll_interval_ms=150, poll_timeout_ms=150, params=[rpm, gear])
+    cat = {c["key"]: c for c in m.catalog()}
+    assert cat["gear"]["derived"] == "gear" and cat["rpm"]["derived"] == ""
+    assert m.selectable() == {"rpm", "gear"}, m.selectable()
+    # what the poll loop asks the bus for is the non-derived half of the same set
+    assert [p.key for p in m.params if not p.derived] == ["rpm"]
+
+
 def test_fast_init_no_crash():
     t = KLineTransport("/dev/null")
     t.ser = FakeSerial(lambda tx: b"")

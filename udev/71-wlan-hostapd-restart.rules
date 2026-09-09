@@ -1,0 +1,7 @@
+# On wlan0 (re)appearance, fully bring the AP back: IP + hostapd + dnsmasq.
+#
+# This is also what starts hostapd at all: its unit carries
+# ConditionPathExists=/sys/class/net/wlan0 (systemd/hostapd-override.conf), so
+# with no dongle plugged in systemd skips it entirely instead of sitting in a
+# 30 s wait-for-wlan0 pre-start and then restarting forever.
+SUBSYSTEM=="net", ACTION=="add", KERNEL=="wlan0", RUN+="/bin/systemctl --no-block start wlan0-ap-recover.service"

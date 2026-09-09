@@ -1,5 +1,5 @@
 {
- "_comment": "IAW 5AM live-data map. Channel names are joined to their rli by the local channel id. Cylinders labelled F/R per the V-twin layout; this engine's V-angle is 87 degrees, so the firing interval is uneven (87/633) and no per-cylinder pair should be expected to sit a fixed 90 apart. Response '61 <rli> <value>', offset 2, big-endian; length per rli from the 2026-08-18 scan. Two flags, two jobs: 'group' says which list the UI draws the row in -- 'known' = proven on this bike, 'check' = named but still to be proven there, 'unknown' = no meaning yet -- while 'default' says what a device with no selected.json polls out of the box. The 2026-09-04 stationary session moved five channels into 'known': 0x39 is the injection period at raw/1000 ms (0 with the engine off, 8.6 ms cranking, 1.89 ms at 36 C), 0x60 is barometric (962 flat, engine on or off), and 0x76/0x78/0x61 are the side stand, the clutch and the neutral flag -- the clutch polarity in status_maps.json had to be swapped, the bike answers 0 with the lever pulled. The 10-minute ride that followed confirmed the lambda integrator's scale 0.1 (-14.4..+16.9 % with 48 zero crossings) and the mV reading of 0x45 (181 crossings of 450 mV), and re-confirmed all three switch polarities from the opposite state -- riding means gear engaged, stand up, lever released. There is no gear number on this ECU: 0x61 is a neutral flag, the 5AM label page has no Value_35 (\"Gear\") slot, and 0x58 -- the one candidate -- turned out to be the engine-state bitfield instead. 0x37 stays open: while running it tracks 0x35 to 0.21 deg, so it is a second advance channel in tenths of a degree, but whether it is the other cylinder or a programmed-advance channel takes a decel/cut-off run to tell -- it reads a flat 8.0 deg with the engine off, which suits 'programmed'. This bike has one lambda sensor, on the front cylinder: the rear is not fitted, so 0x46, 0x48, 0x4A and 0x4C read a flat 0 here and cannot be confirmed on this machine at all -- the names are provisional and the F/R pairing is by rli order. 0x54/0x55 keep the channel but not the word 'angle': across 424 samples the pair settles after every start (869->700 in five seconds from cold, the same from a 40 C and an 87 C start, 1210 while the starter turns) and ignores rpm, which is a charge time compensated for battery voltage, not an angle -- the unit stays raw until a session with vbat and a switched load names it. The 2026-09-05 pair of sessions settled four more. 0x54/0x55 are a charge time compensated for battery voltage: inside a narrow rpm band dwell_f falls monotonically as vbat rises (1200-1600 rpm: 739 at 13.7 V, 737 at 13.8, 723 at 13.9; 2200-3000 rpm: 797 at 13.4, 778 at 13.5, 766 at 13.6), the slope is -80..-150 counts per volt, cranking at 11.2 V reads 1066/2620 and the engine off at 12.3 V a static 731/846, while rpm at a fixed voltage moves it by only ~15 counts per 600 rpm. The unit stays raw -- the count could be ~4 us (2.8 ms at 13.7 V, 4.3 ms cranking) but nothing in the log names the multiplier. 0x6B is the temperature-scheduled base position of the idle stepper: 117 at 51 C, 113 at 60, 108 at 65, 103 at 70, 100 from 75 C up, with idle_target riding along 1472 -> 1404 rpm. 0x49 is the loop flag it was named for: 2 on 3562 samples (lambda swinging about 455 mV), 0 on 947 at small throttle and on the overrun (591 mV mean). 0x58 is confirmed as the engine-state bitfield, but the labels shipped in status_maps.json were wrong and are rewritten there. Still open: 0x37 (the kill-switch run was not made -- it tracks 0x35 to a mean of -0.04 deg with 1.35 deg rms scatter that a regression shows is *not* sampling skew, and holds a static 8.0 deg with the engine stopped while 0x35 reads 0), 0x4B (a phase code: it ping-pongs 7<->5 with the sensor -- 7 at 375 mV with the integrator rising, 5 at 543 mV with it falling -- 3 and 4 on the overrun, 1 and 2 only below 76 C), 0x6D (moved 7..27 with no relation to rpm minus idle_target) and 0x3D/0x72, which read a flat zero across all 4856 samples of both logs.",
+ "_comment": "IAW 5AM live-data map. Channel names are joined to their rli by the local channel id. Cylinders labelled F/R per the V-twin layout; this engine's V-angle is 87 degrees, so the firing interval is uneven (87/633) and no per-cylinder pair should be expected to sit a fixed 90 apart. Response '61 <rli> <value>', offset 2, big-endian; length per rli from the 2026-08-18 scan. Two flags, two jobs: 'group' says which list the UI draws the row in -- 'known' = proven on this bike, 'check' = named but still to be proven there, 'unknown' = no meaning yet -- while 'default' says what a device with no selected.json polls out of the box. The 2026-09-04 stationary session moved five channels into 'known': 0x39 is the injection period at raw/1000 ms (0 with the engine off, 8.6 ms cranking, 1.89 ms at 36 C), 0x60 is barometric (962 flat, engine on or off), and 0x76/0x78/0x61 are the side stand, the clutch and the neutral flag -- the clutch polarity in status_maps.json had to be swapped, the bike answers 0 with the lever pulled. The 10-minute ride that followed confirmed the lambda integrator's scale 0.1 (-14.4..+16.9 % with 48 zero crossings) and the mV reading of 0x45 (181 crossings of 450 mV), and re-confirmed all three switch polarities from the opposite state -- riding means gear engaged, stand up, lever released. There is no gear number on this ECU: 0x61 is a neutral flag, the 5AM label page has no Value_35 (\"Gear\") slot, and 0x58 -- the one candidate -- turned out to be the engine-state bitfield instead. 0x37 stays open: while running it tracks 0x35 to 0.21 deg, so it is a second advance channel in tenths of a degree, but whether it is the other cylinder or a programmed-advance channel takes a decel/cut-off run to tell -- it reads a flat 8.0 deg with the engine off, which suits 'programmed'. This bike has one lambda sensor, on the front cylinder: the rear is not fitted, so 0x46, 0x48, 0x4A and 0x4C read a flat 0 here and cannot be confirmed on this machine at all -- the names are provisional and the F/R pairing is by rli order. 0x54/0x55 keep the channel but not the word 'angle': across 424 samples the pair settles after every start (869->700 in five seconds from cold, the same from a 40 C and an 87 C start, 1210 while the starter turns) and ignores rpm, which is a charge time compensated for battery voltage, not an angle -- the unit stays raw until a session with vbat and a switched load names it. The 2026-09-05 pair of sessions settled four more. 0x54/0x55 are a charge time compensated for battery voltage: inside a narrow rpm band dwell_f falls monotonically as vbat rises (1200-1600 rpm: 739 at 13.7 V, 737 at 13.8, 723 at 13.9; 2200-3000 rpm: 797 at 13.4, 778 at 13.5, 766 at 13.6), the slope is -80..-150 counts per volt, cranking at 11.2 V reads 1066/2620 and the engine off at 12.3 V a static 731/846, while rpm at a fixed voltage moves it by only ~15 counts per 600 rpm. The unit stays raw -- the count could be ~4 us (2.8 ms at 13.7 V, 4.3 ms cranking) but nothing in the log names the multiplier. 0x6B is the temperature-scheduled base position of the idle stepper: 117 at 51 C, 113 at 60, 108 at 65, 103 at 70, 100 from 75 C up, with idle_target riding along 1472 -> 1404 rpm. 0x49 is the loop flag it was named for: 2 on 3562 samples (lambda swinging about 455 mV), 0 on 947 at small throttle and on the overrun (591 mV mean). 0x58 is confirmed as the engine-state bitfield, but the labels shipped in status_maps.json were wrong and are rewritten there. The 2026-09-08 session -- two real cold starts (22 C in the morning, 27 C in the evening) and two kill-switch stops on a running engine, 2320 samples -- closed three more. 0x37 is the *live* advance, not the second cylinder: while running it is the same number as 0x35 (mean +0.02 deg over 1365 samples, and 17 % of the scatter is read skew -- r = -0.416 against the local slope of 0x35, which is read one request earlier -- while the residual is white noise, lag-1 autocorrelation 0.05, so there is no standing per-cylinder offset). The two part company only off the engine: 0x37 falls to a fixed 8.0 deg while 0x35 freezes at whatever it last held (21.0), and it does so in the very sample where inj_period, lambda_int_f, lambda_reg_f and lambda_ctl_f all reset -- 0x37 belongs to that live group, 0x35 is a latch. Cranking shows the same thing from the other side: 8.0 -> 13.0 -> 22.2 on 0x37 while 0x35 still reads 0. 0x4B is the lambda controller's phase code, split by the sign of the 0x47 step inside an unchanged state: 7 rises 266 times against 32 (lambda median 175 mV, lean) and 5 falls 200 against 35 (median 727 mV, rich), both with 0x49 = 2, so they are the two branches of the closed loop (231 and 228 transitions between them); 4 is open loop with the integrator held (57 of 120 steps flat), 1 is the controller frozen with the engine stopped (124 of 125 flat) and 2 only appears on a cold sensor (39-63 mV). Labels are in status_maps.json as 'lambda_ctl'. 0x6D is the closed-loop trim riding on top of 0x6B: from cold it ran 16 -> 36 -> 51 -> 63 -> 70 in four seconds while rpm sat 200 below idle_target and backed off (65 -> 61 -> 59) in the first sample rpm went over it; the mean step against rpm minus idle_target is monotone (-300..-201 -> +2.88, -200..-101 -> +0.92, -100..-1 -> +0.13, 0..+99 -> -0.27) and warm, with 0x6B pinned at 100, it sits 6..18. Range this session 0..73. The 2026-09-08 firmware read settled which rli can ever say anything. my_original_fw.bin holds the dispatch table for service 21 <rli> at file offset 0x045BE: 79 records of 6 bytes, {rli:u16, slot:u16, 0x0002}, running 0x30..0x7F with 0x4F missing -- the one rli that does not answer -- and 79 is what the toolchain's own comment a page later calls it ('Array di 79 bytes + 1 a disposizione per commenti'). Three slots are shared: 0x18CE by 18 rli that answer a 2-byte zero, 0x18BC by 18 that answer a 1-byte zero and 0x18EC by the two 3-byte ones. Those 38 are a constant zero by construction -- there is no code behind them -- which is why 0x3B stayed flat over 1143 samples, 0x72 over ~5600 and the whole rear bank over every ride. The table is byte-identical in 23ECCLGPSMD, so this is a property of the 5AM software, not of a calibration, and no firmware in hand changes it. 34 of them carry 'dead': true and a (null) suffix: the record stays because the rli is real, but nothing may select one -- see ParamMap.selectable(). The rear bank (0x46/0x48/0x4A/0x4C) is the deliberate exception: it is a stub *here*, and the sensor is not fitted here, but other Granpasso builds wire it, so the four keep their names and sit in 'check' with default false. 0x3D has a slot of its own (0x1AA0), so its zero is a value and not a stub -- the CO Trimm reading stays open. The 9 unknown rli that answered non-zero also have slots of their own and moved to 'check': 0x3E, 0x57, 0x5C, 0x62, 0x6C, 0x74, 0x75, 0x77, 0x7A. Two hints came free from the table order. 0x6C sits between 0x6B and 0x6D and read 164 where those two read 118 and 46 -- exactly their sum -- which reads as the idle stepper's total position (one sample, so the name carries a question mark). And 0x74/0x75/0x77/0x79/0x7A bracket 0x76 (side stand) and 0x78 (clutch), so that run is the digital-input block; each is a switch to be found by working the handlebars with the ignition on. The 9 unknown rli that have their own slot but answered zero in that one sweep -- 0x53, 0x5D, 0x5E, 0x5F, 0x63, 0x6A, 0x6E, 0x70, 0x79 -- are real variables still waiting for the condition that moves them.",
  "poll_interval_ms": 150,
  "poll_timeout_ms": 150,
  "params": [
@@ -17,6 +17,23 @@
    "bias": 0.0,
    "digits": 0,
    "default": true,
+   "group": "known"
+  },
+  {
+   "key": "gear",
+   "name": "Gear",
+   "unit": "",
+   "rli": 0,
+   "fmt": 2,
+   "offset": 2,
+   "length": 1,
+   "endian": "big",
+   "signed": false,
+   "scale": 1.0,
+   "bias": 0.0,
+   "digits": 0,
+   "default": false,
+   "derived": "gear",
    "group": "known"
   },
   {
@@ -128,8 +145,8 @@
    "scale": 1.0,
    "bias": 0.0,
    "digits": 0,
-   "default": true,
-   "group": "known"
+   "default": false,
+   "group": "check"
   },
   {
    "key": "inj_period",
@@ -346,12 +363,12 @@
    "scale": 0.1,
    "bias": 0.0,
    "digits": 1,
-   "default": true,
+   "default": false,
    "group": "check"
   },
   {
    "key": "advance2",
-   "name": "Advance ignition 2",
+   "name": "Advance (live)",
    "unit": "°",
    "rli": 55,
    "fmt": 2,
@@ -363,7 +380,7 @@
    "bias": 0.0,
    "digits": 1,
    "default": true,
-   "group": "check"
+   "group": "known"
   },
   {
    "key": "co_trim",
@@ -411,7 +428,9 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
-   "group": "check"
+   "group": "known",
+   "map": "lambda_ctl",
+   "map_type": "enum"
   },
   {
    "key": "lambda_ctl_r",
@@ -443,11 +462,11 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
-   "group": "check"
+   "group": "known"
   },
   {
    "key": "prog_counter",
-   "name": "Prog counter",
+   "name": "Prog counter (null)",
    "unit": "",
    "rli": 114,
    "fmt": 2,
@@ -459,11 +478,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
-   "group": "check"
+   "dead": true,
+   "group": "unknown"
   },
   {
    "key": "r3b",
-   "name": "rli 0x3B (was “CO / duty”; CO Trimm is 0x3D)",
+   "name": "rli 0x3B (null; was “CO / duty”, CO Trimm is 0x3D)",
    "unit": "",
    "rli": 59,
    "fmt": 2,
@@ -474,12 +494,13 @@
    "scale": 1.0,
    "bias": 0.0,
    "digits": 0,
-   "default": true,
+   "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r31",
-   "name": "rli 0x31",
+   "name": "rli 0x31 (null)",
    "unit": "",
    "rli": 49,
    "fmt": 2,
@@ -491,11 +512,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r36",
-   "name": "rli 0x36",
+   "name": "rli 0x36 (null)",
    "unit": "",
    "rli": 54,
    "fmt": 2,
@@ -507,11 +529,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r38",
-   "name": "rli 0x38",
+   "name": "rli 0x38 (null)",
    "unit": "",
    "rli": 56,
    "fmt": 2,
@@ -523,11 +546,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r3e",
-   "name": "rli 0x3E (config/ID byte, const)",
+   "name": "rli 0x3E (config/ID byte, const 52)",
    "unit": "",
    "rli": 62,
    "fmt": 2,
@@ -539,11 +563,11 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
-   "group": "unknown"
+   "group": "check"
   },
   {
    "key": "r3f",
-   "name": "rli 0x3F",
+   "name": "rli 0x3F (null)",
    "unit": "",
    "rli": 63,
    "fmt": 2,
@@ -555,11 +579,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r40",
-   "name": "rli 0x40",
+   "name": "rli 0x40 (null)",
    "unit": "",
    "rli": 64,
    "fmt": 2,
@@ -571,11 +596,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r41",
-   "name": "rli 0x41",
+   "name": "rli 0x41 (null)",
    "unit": "",
    "rli": 65,
    "fmt": 2,
@@ -587,11 +613,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r42",
-   "name": "rli 0x42",
+   "name": "rli 0x42 (null)",
    "unit": "",
    "rli": 66,
    "fmt": 2,
@@ -603,11 +630,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r43",
-   "name": "rli 0x43",
+   "name": "rli 0x43 (null)",
    "unit": "",
    "rli": 67,
    "fmt": 2,
@@ -619,11 +647,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r44",
-   "name": "rli 0x44",
+   "name": "rli 0x44 (null)",
    "unit": "",
    "rli": 68,
    "fmt": 2,
@@ -635,11 +664,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r4d",
-   "name": "rli 0x4D",
+   "name": "rli 0x4D (null)",
    "unit": "",
    "rli": 77,
    "fmt": 2,
@@ -651,11 +681,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r4e",
-   "name": "rli 0x4E",
+   "name": "rli 0x4E (null)",
    "unit": "",
    "rli": 78,
    "fmt": 2,
@@ -667,11 +698,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r50",
-   "name": "rli 0x50",
+   "name": "rli 0x50 (null)",
    "unit": "",
    "rli": 80,
    "fmt": 2,
@@ -683,11 +715,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r51",
-   "name": "rli 0x51",
+   "name": "rli 0x51 (null)",
    "unit": "",
    "rli": 81,
    "fmt": 2,
@@ -699,11 +732,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r52",
-   "name": "rli 0x52",
+   "name": "rli 0x52 (null)",
    "unit": "",
    "rli": 82,
    "fmt": 2,
@@ -715,12 +749,13 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r53",
-   "name": "rli 0x53",
-   "unit": "",
+   "name": "Road speed",
+   "unit": "km/h",
    "rli": 83,
    "fmt": 2,
    "offset": 2,
@@ -731,11 +766,11 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
-   "group": "unknown"
+   "group": "known"
   },
   {
    "key": "r56",
-   "name": "rli 0x56",
+   "name": "rli 0x56 (null)",
    "unit": "",
    "rli": 86,
    "fmt": 2,
@@ -747,11 +782,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r57",
-   "name": "rli 0x57 (status, const 4)",
+   "name": "rli 0x57 (stop state: 4 run, 8/16 stopped)",
    "unit": "",
    "rli": 87,
    "fmt": 2,
@@ -763,11 +799,11 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
-   "group": "unknown"
+   "group": "check"
   },
   {
    "key": "r59",
-   "name": "rli 0x59",
+   "name": "rli 0x59 (null)",
    "unit": "",
    "rli": 89,
    "fmt": 2,
@@ -779,11 +815,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r5a",
-   "name": "rli 0x5A",
+   "name": "rli 0x5A (null)",
    "unit": "",
    "rli": 90,
    "fmt": 2,
@@ -795,11 +832,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r5b",
-   "name": "rli 0x5B",
+   "name": "rli 0x5B (null)",
    "unit": "",
    "rli": 91,
    "fmt": 2,
@@ -811,11 +849,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r5c",
-   "name": "rli 0x5C",
+   "name": "rli 0x5C (closed throttle, 1 shut / 4 open)",
    "unit": "",
    "rli": 92,
    "fmt": 2,
@@ -827,11 +866,11 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
-   "group": "unknown"
+   "group": "check"
   },
   {
    "key": "r5d",
-   "name": "rli 0x5D",
+   "name": "rli 0x5D (flat 0 through the limiter)",
    "unit": "",
    "rli": 93,
    "fmt": 2,
@@ -847,7 +886,7 @@
   },
   {
    "key": "r5e",
-   "name": "rli 0x5E",
+   "name": "rli 0x5E (flat 0 through the limiter)",
    "unit": "",
    "rli": 94,
    "fmt": 2,
@@ -863,7 +902,7 @@
   },
   {
    "key": "r5f",
-   "name": "rli 0x5F",
+   "name": "rli 0x5F (flat 0 through the limiter)",
    "unit": "",
    "rli": 95,
    "fmt": 2,
@@ -879,7 +918,7 @@
   },
   {
    "key": "r62",
-   "name": "rli 0x62",
+   "name": "rli 0x62 (idle mode? 0 off, 4 idle, 2 off-idle)",
    "unit": "",
    "rli": 98,
    "fmt": 2,
@@ -891,11 +930,11 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
-   "group": "unknown"
+   "group": "check"
   },
   {
    "key": "r63",
-   "name": "rli 0x63",
+   "name": "rli 0x63 (flat 0 through the limiter)",
    "unit": "",
    "rli": 99,
    "fmt": 2,
@@ -911,7 +950,7 @@
   },
   {
    "key": "r64",
-   "name": "rli 0x64",
+   "name": "rli 0x64 (null)",
    "unit": "",
    "rli": 100,
    "fmt": 2,
@@ -923,11 +962,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r65",
-   "name": "rli 0x65",
+   "name": "rli 0x65 (null)",
    "unit": "",
    "rli": 101,
    "fmt": 2,
@@ -939,11 +979,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r66",
-   "name": "rli 0x66",
+   "name": "rli 0x66 (null)",
    "unit": "",
    "rli": 102,
    "fmt": 2,
@@ -955,11 +996,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r67",
-   "name": "rli 0x67",
+   "name": "rli 0x67 (null)",
    "unit": "",
    "rli": 103,
    "fmt": 2,
@@ -971,11 +1013,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r68",
-   "name": "rli 0x68",
+   "name": "rli 0x68 (null)",
    "unit": "",
    "rli": 104,
    "fmt": 2,
@@ -987,11 +1030,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r69",
-   "name": "rli 0x69",
+   "name": "rli 0x69 (null)",
    "unit": "",
    "rli": 105,
    "fmt": 2,
@@ -1003,11 +1047,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r6a",
-   "name": "rli 0x6A",
+   "name": "rli 0x6A (0..21, cruise only)",
    "unit": "",
    "rli": 106,
    "fmt": 2,
@@ -1019,11 +1064,11 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
-   "group": "unknown"
+   "group": "check"
   },
   {
    "key": "r6c",
-   "name": "rli 0x6C",
+   "name": "Idle stepper position",
    "unit": "",
    "rli": 108,
    "fmt": 2,
@@ -1035,7 +1080,7 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
-   "group": "unknown"
+   "group": "known"
   },
   {
    "key": "r6e",
@@ -1055,7 +1100,7 @@
   },
   {
    "key": "r6f",
-   "name": "rli 0x6F",
+   "name": "rli 0x6F (null)",
    "unit": "",
    "rli": 111,
    "fmt": 2,
@@ -1067,6 +1112,7 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
@@ -1087,7 +1133,7 @@
   },
   {
    "key": "r71",
-   "name": "rli 0x71",
+   "name": "rli 0x71 (null)",
    "unit": "",
    "rli": 113,
    "fmt": 2,
@@ -1099,11 +1145,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r73",
-   "name": "rli 0x73",
+   "name": "rli 0x73 (null)",
    "unit": "",
    "rli": 115,
    "fmt": 2,
@@ -1115,11 +1162,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r74",
-   "name": "rli 0x74",
+   "name": "rli 0x74 (const 1 so far)",
    "unit": "",
    "rli": 116,
    "fmt": 2,
@@ -1131,11 +1179,11 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
-   "group": "unknown"
+   "group": "check"
   },
   {
    "key": "r75",
-   "name": "rli 0x75",
+   "name": "rli 0x75 (1 from the starter on)",
    "unit": "",
    "rli": 117,
    "fmt": 2,
@@ -1147,11 +1195,11 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
-   "group": "unknown"
+   "group": "check"
   },
   {
    "key": "r77",
-   "name": "rli 0x77",
+   "name": "rli 0x77 (const 1 so far)",
    "unit": "",
    "rli": 119,
    "fmt": 2,
@@ -1163,11 +1211,11 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
-   "group": "unknown"
+   "group": "check"
   },
   {
    "key": "r79",
-   "name": "rli 0x79",
+   "name": "rli 0x79 (kill switch STOP?, inverse of 0x7A)",
    "unit": "",
    "rli": 121,
    "fmt": 2,
@@ -1179,11 +1227,11 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
-   "group": "unknown"
+   "group": "check"
   },
   {
    "key": "r7a",
-   "name": "rli 0x7A",
+   "name": "rli 0x7A (kill switch RUN?)",
    "unit": "",
    "rli": 122,
    "fmt": 2,
@@ -1195,11 +1243,11 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
-   "group": "unknown"
+   "group": "check"
   },
   {
    "key": "r7b",
-   "name": "rli 0x7B",
+   "name": "rli 0x7B (null)",
    "unit": "",
    "rli": 123,
    "fmt": 2,
@@ -1211,11 +1259,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r7c",
-   "name": "rli 0x7C",
+   "name": "rli 0x7C (null)",
    "unit": "",
    "rli": 124,
    "fmt": 2,
@@ -1227,11 +1276,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r7d",
-   "name": "rli 0x7D",
+   "name": "rli 0x7D (null)",
    "unit": "",
    "rli": 125,
    "fmt": 2,
@@ -1243,11 +1293,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r7e",
-   "name": "rli 0x7E",
+   "name": "rli 0x7E (null)",
    "unit": "",
    "rli": 126,
    "fmt": 2,
@@ -1259,11 +1310,12 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   },
   {
    "key": "r7f",
-   "name": "rli 0x7F",
+   "name": "rli 0x7F (null)",
    "unit": "",
    "rli": 127,
    "fmt": 2,
@@ -1275,6 +1327,7 @@
    "bias": 0.0,
    "digits": 0,
    "default": false,
+   "dead": true,
    "group": "unknown"
   }
  ]

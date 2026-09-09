@@ -2,9 +2,9 @@
   "_comment": "IAW status/bitfield decoders. 'enum' = value maps to one label; 'bits' = value is a bitmask, list every set flag. 'base' = radix of the keys. Attach to a param in params.json via {\"map\":\"<name>\",\"map_type\":\"enum|bits\"} once the status-carrying rli is identified; the raw value is still logged.",
   "maps": {
     "motorstate": {
-      "_note": "0x58 read against 0x30/0x34/0x33 on 2026-09-05 (326 samples): only 0, 5, 6 and 7 ever appeared. 0x04 stands for as long as the engine turns and is the only bit left when it stops. 0x01 follows the throttle a sample ahead of 0x34 -- set while it sits at 1.7-2.0 deg, clear the moment it opens past 4.8 -- so it is the closed-throttle/idle condition, not a power state. 0x02 came up once as the coolant crossed 53->54 C and never cleared again, which reads as the after-start/warm-up phase ending. The three high bits were never observed here, so their meaning is still a guess and they are labelled as such. The old labels (0x01 'Power-On, engine OFF', 0x02 'Ignition ON, engine OFF') contradicted the data -- they were set with the engine running.",
+      "_note": "0x58 read against 0x30/0x34/0x33 on 2026-09-05 (326 samples): only 0, 5, 6 and 7 ever appeared. 0x04 stands for as long as the engine turns and is the only bit left when it stops. 0x01 follows the throttle a sample ahead of 0x34 -- set while it sits at 1.7-2.0 deg, clear the moment it opens past 4.8 -- so it is the closed-throttle/idle condition, not a power state. 0x02 is a timer, not a temperature threshold: on 2026-09-08 it set 32 s after cranking began in both cold starts -- 09:53:09 -> 09:53:41 at 25 C and 18:59:03 -> 18:59:35 at 29 C, i.e. ~30 s after the engine caught, at coolant readings 4 C apart -- and never cleared. The 2026-09-05 reading (a single set as the coolant crossed 53->54 C) had only one start to look at and named it 'Warm-up done'. The three high bits were never observed here, so their meaning is still a guess and they are labelled as such. The old labels (0x01 'Power-On, engine OFF', 0x02 'Ignition ON, engine OFF') contradicted the data -- they were set with the engine running.",
       "type": "bits", "base": 16,
-      "values": {"01": "Closed throttle (idle)", "02": "Warm-up done", "04": "Engine running", "08": "bit 0x08 (never observed)", "10": "bit 0x10 (never observed)", "20": "bit 0x20 (never observed)"}
+      "values": {"01": "Closed throttle (idle)", "02": "After-start phase over (~30 s timer)", "04": "Engine running", "08": "bit 0x08 (never observed)", "10": "bit 0x10 (never observed)", "20": "bit 0x20 (never observed)"}
     },
     "motor": {
       "type": "bits", "base": 16,
@@ -26,6 +26,11 @@
     "neutral": {
       "type": "enum", "base": 16,
       "values": {"00": "Neutral", "01": "Engaged"}
+    },
+    "lambda_ctl": {
+      "_note": "0x4B on 2026-09-08 (1130 same-state pairs), split by the sign of the 0x47 integrator step: 7 rises 266 times against 32 with the sensor at a median 175 mV (lean), 5 falls 200 against 35 at a median 727 mV (rich), and both carry 0x49 = 2 -- the two branches of the closed loop, 231 and 228 transitions between them. 4 is open loop with the integrator held (57 of 120 steps flat, 0x49 = 0), 3 is the same but transitional and rare, 1 is the controller frozen with the engine stopped (124 of 125 steps flat) and 2 only shows on a cold sensor (39-63 mV, integrator at 0). 0 and 6 were never seen, so they carry no label.",
+      "type": "enum", "base": 16,
+      "values": {"01": "Controller idle (engine off)", "02": "Cold sensor", "03": "Open loop (transition)", "04": "Open loop", "05": "Closed loop, leaning out", "07": "Closed loop, enriching"}
     },
     "lambda_loop": {
       "_note": "0x49 on the 2026-09-04 warm-up: a flat 0 for the first 43 s from cold, then 0<->2 at the rate the sensor itself switches -- 2 is the closed-loop correction being applied",

@@ -50,11 +50,27 @@ Wat het doet, op volgorde:
 5. **Zaait de runtimeconfiguratie** in `/etc/onboard-logger/`: `config.json`, `params.json`,
    `ecu_id.json` — **alleen als ze ontbreken** (`[ -f ] || cp`). Zie *Gelaagde configuratie*
    hieronder.
-6. **udev-regel** → `/dev/kline`, **NetworkManager** krijgt te horen `wlan0` met rust te laten, de
-   radio wordt vrijgegeven en het regelgevingsdomein uit `wifi.country` gezet.
+6. **udev-regels** — `/dev/kline`; USB-runtimeenergiebeheer **uitgezet** voor de OTG-roothub, de
+   FTDI-kabel, de wifi-dongle en de hub die ze draagt; plus een regel die het accesspoint (adres,
+   hostapd, dnsmasq) opnieuw toepast zodra `wlan0` na een USB-herenumeratie weer verschijnt.
+   Runtime-suspend van de dwc2-roothub loopt vast in zijn eigen resumepad en laat de bus onder de
+   adapters doorcyclen — zo vallen een FTDI-kabel en een dongle tegelijk weg tijdens een rit.
+   **NetworkManager** krijgt te horen `wlan0` met rust te laten, de radio wordt vrijgegeven en het
+   regelgevingsdomein uit `wifi.country` gezet.
 7. **Autostart van hostapd/dnsmasq uitgezet** — de app zet ze zelf aan zodra de configuratie er is,
-   zodat hun eigen opstartvolgorde niet eerder kan falen.
+   zodat hun eigen opstartvolgorde niet eerder kan falen. hostapd krijgt daarnaast een drop-in met
+   `ConditionPathExists=/sys/class/net/wlan0`: zonder dongle wordt de unit overgeslagen in plaats
+   van 30 s te wachten op een interface die niet komt en daarna eindeloos te herstarten.
 8. **systemd-unit** geïnstalleerd, ingeschakeld en gestart.
+9. **Logdiscipline** — het journal begrensd op 64 MB en de terugschrijfvertraging van de paginacache
+   teruggebracht tot ~5 s: de motor haalt de stroom eraf met het contact, een nette afsluiting is de
+   uitzondering. `rsyslog` wordt versmald in plaats van verwijderd: zijn standaardregel `*.*` schreef
+   elke regel een tweede keer naar de kaart, maar de eigen gebeurtenissen van het board houden een
+   kopie in platte tekst in `/var/log/onboard-logger.log` — een stroomonderbreking kan het binaire
+   journal afkappen waar een tekstregel het overleeft.
+10. **De fabrieksimage wordt uitgedund** — `multi-user.target` als standaard, en ModemManager,
+    Bluetooth, `NetworkManager-wait-online` en apt's dagelijkse timers uitgezet. Samen kosten ze
+    zo'n tien seconden van elke start, en de motor heeft geen internet voor ze.
 
 Daarna:
 
@@ -235,6 +251,45 @@ mv /opt/onboard-logger.failed/.venv /opt/onboard-logger/.venv   # als de terugge
 mv /opt/onboard-logger.failed/bin   /opt/onboard-logger/bin
 systemctl start onboard-logger
 ```
+
+---
+
+## Add-ons
+
+Een add-on is een pagina die het board serveert en een opslag die het voor die pagina bijhoudt.
+**Geen enkele regel code van een add-on draait op het board** — het is alleen inhoud, en juist
+daarom is het vanaf een telefoon te installeren. De enige die bestaat is de mapviewer:
+`./release-addon.sh` in `ecu-map-viewer` bouwt `ecu-map-viewer-addon-<versie>-<sha>.tar.gz`, en
+**Config → System → Add-ons** neemt hem aan.
+
+Alles wat een add-on bezit staat in één map:
+
+```
+/opt/onboard-logger/addons/maps/addon.json   naam, versie, titel
+/opt/onboard-logger/addons/maps/web/         de pagina, geserveerd op /addons/maps/
+/opt/onboard-logger/addons/maps/data/        bestanden van de add-on, alleen via de API
+```
+
+De scheiding is opzet. Zouden bewaarde bestanden in de geserveerde boom staan, dan waren ze ook als
+statische inhoud bereikbaar, getypeerd op hun extensie — en een geüploade `.html` zou dan in de
+origin van dit board draaien. Serveren en bewaren zijn verschillende deuren.
+
+`addons/` is het derde dat in `/opt/onboard-logger` staat zonder uit een release te komen; de andere
+twee zijn `.venv` en `bin/5am_util`. Daarom sluit `deploy.sh` het uit (wat het meteen tegen
+`--delete` beschermt), draagt een update het over de wissel heen en haalt de rollback het terug. Een
+deploy vanaf de dev-machine raakt een geïnstalleerde add-on en zijn bestanden nooit aan.
+
+**Verwijderen is `rm -rf` van die ene map**: code en data gaan samen, en er blijft nergens iets van
+over. De knop in Config → System doet precies dat, en vraagt eerst.
+
+Met de mapviewer geïnstalleerd krijgt het tabblad Firmware een knop **Map tonen** naast *Diff 2
+.bin*: vink een of meer images aan, druk erop, en ze openen in de viewer. Hij hergebruikt het
+tabblad dat hij al opende, zodat de ene kalibratie na de andere vergelijken geen spoor van vensters
+achterlaat.
+
+Zijn XDF-definities bewaart de viewer in de eigen opslag van de add-on — het board leert nooit wat
+een `.xdf` is. Sleep er eenmaal een in en hij blijft op het board, zodat een latere *Map tonen*
+meteen tekent.
 
 ---
 

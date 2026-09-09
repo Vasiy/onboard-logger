@@ -281,7 +281,7 @@ def test_missing_output_is_a_failure():
     with tempfile.TemporaryDirectory() as tmp:
         fm, _logs = _run_util(tmp, 'echo "[+] pretending"')
         assert fm.status()["result"] == "error"
-        assert "не создан" in fm.status()["progress"]
+        assert "was not created" in fm.status()["progress"]
 
 
 def test_verbose_box_streams_everything_to_the_ui():

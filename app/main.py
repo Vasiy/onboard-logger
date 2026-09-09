@@ -19,14 +19,18 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import (FileResponse, JSONResponse, PlainTextResponse,
-                               StreamingResponse)
+                               RedirectResponse, Response, StreamingResponse)
 from fastapi.staticfiles import StaticFiles
 
 from .kline.ecu_id import load_fields, parse_desc
 from .kline.logger import KLineWorker
 from .web import system
+from .web import addons as addons_mod
+from .web.archive import (flat_entries, resolve_in, safe_name, split_names,
+                          zip_entries)
+from .web.addons import AddonManager
 from .web.config_mgr import ConfigManager, REPO_DIR, _deep_merge
 from .web.diag import DiagLog
 from .web.storage import StorageManager, parse_day
@@ -46,20 +50,15 @@ UTIL_PATH = Path("/opt/onboard-logger/bin/5am_util")
 # REPO_DIR is the checkout on a dev host, /opt/onboard-logger on the board.
 INSTALL_DIR = REPO_DIR
 UPDATE_DIR = Path("/opt/updates")
+# Add-ons live inside the install tree but outside the repository, like .venv and
+# bin/5am_util: deploy.sh excludes them and update.py carries them across a swap.
+ADDONS_DIR = INSTALL_DIR / "addons"
 # IAW 5AM firmware image size (0x50000). Writing anything else bricks the ECU.
 DEFAULT_FW_SIZE = 327680
 
 
 def _required_fw_size() -> int:
     return int(cm.load().get("firmware_size", DEFAULT_FW_SIZE))
-
-
-def _safe_name(name: str) -> str:
-    """Basename restricted to a safe charset (defends the fw/log dirs)."""
-    base = Path(name).name
-    if not base or not all(c.isalnum() or c in "._-" for c in base):
-        raise ValueError("недопустимое имя файла")
-    return base
 
 
 def _safe_rel(name: str) -> str:
@@ -72,10 +71,10 @@ def _safe_rel(name: str) -> str:
     """
     parts = [q for q in str(name).replace("\\", "/").split("/") if q]
     if not parts or len(parts) > 2 or any(q in (".", "..") for q in parts):
-        raise ValueError("недопустимое имя файла")
+        raise ValueError("bad file name")
     if len(parts) == 2 and parse_day(parts[0]) is None:
-        raise ValueError("недопустимое имя файла")
-    return "/".join(parts[:-1] + [_safe_name(parts[-1])])
+        raise ValueError("bad file name")
+    return "/".join(parts[:-1] + [safe_name(parts[-1])])
 
 
 def _logs_root() -> Path:
@@ -311,18 +310,36 @@ def _load_selected() -> list | None:
 
 PRESET_SLOTS = 3
 PRESET_NAME_MAX = 8
+# A note explains how to capture a preset — cold engine, before the fan, that
+# sort of thing. Long enough for a real procedure, capped so a paste cannot fill
+# the card the ride logs share.
+NOTE_MAX = 4096
 
 
 def _presets_path() -> Path:
     return ETC / "presets.json" if ETC.exists() else REPO_DIR / "config" / "presets.json"
 
 
+def _norm_note(raw) -> str:
+    """One note, trimmed to NOTE_MAX. The same cut for a slot and for the free
+    selection, so there is one answer to "how long may this be"."""
+    return str(raw or "")[:NOTE_MAX]
+
+
+def _selectable_keys() -> set[str]:
+    """Keys a selection may name: everything the catalog carries minus the rli the
+    firmware answers from a shared placeholder slot. One answer, so a dead channel
+    cannot slip in through a preset, a stored selection or the API."""
+    return {c["key"] for c in state.snapshot().get("catalog", []) if not c.get("dead")}
+
+
 def _norm_presets(raw) -> list[dict]:
     """Coerce anything into exactly PRESET_SLOTS slots. The only validation point:
-    names are trimmed to PRESET_NAME_MAX, keys are filtered against the live catalog
-    (a params.json edit can retire a channel a preset still names) and de-duped with
-    their order kept — the decoded CSV writes its columns in selection order."""
-    valid = {c["key"] for c in state.snapshot().get("catalog", [])}
+    names are trimmed to PRESET_NAME_MAX, notes to NOTE_MAX, keys are filtered
+    against the live catalog (a params.json edit can retire a channel a preset
+    still names) and de-duped with their order kept — the decoded CSV writes its
+    columns in selection order."""
+    valid = _selectable_keys()
     out: list[dict] = []
     items = raw if isinstance(raw, list) else []
     for i in range(PRESET_SLOTS):
@@ -334,7 +351,7 @@ def _norm_presets(raw) -> list[dict]:
             if k in valid and k not in seen:
                 seen.add(k)
                 keys.append(k)
-        out.append({"name": name, "keys": keys})
+        out.append({"name": name, "keys": keys, "note": _norm_note(item.get("note"))})
     return out
 
 
@@ -349,11 +366,24 @@ def _boot_selection(saved, presets: list[dict], valid: set[str]) -> list[str]:
     return sel
 
 
-def _save_presets(presets: list[dict]) -> None:
+def _save_presets(presets: list[dict], free_note: str = "") -> None:
     try:
-        _presets_path().write_text(json.dumps(presets))
+        _presets_path().write_text(json.dumps(
+            {"slots": presets, "free_note": free_note}, ensure_ascii=False))
     except OSError:
         pass
+
+
+def _split_presets_file(raw):
+    """(slots, free_note) out of either shape of presets.json.
+
+    The file was a bare list of slots before notes existed, and that is what is
+    sitting in /etc on every board today. Reading only the new shape would drop
+    three working presets on the first start after an update.
+    """
+    if isinstance(raw, dict):
+        return raw.get("slots"), _norm_note(raw.get("free_note"))
+    return raw, ""
 
 
 def _load_presets() -> list | None:
@@ -386,7 +416,7 @@ def _after_network(cfg: dict, rep: dict) -> None:
     if rep.get("fallback_to_ap"):
         cfg["wifi"]["mode"] = "ap"
         cm.save(cfg)
-        state.set_status("error", "Wi-Fi: " + rep.get("client_error", "клиент не подключился"))
+        state.set_status("error", "Wi-Fi: " + rep.get("client_error", "client did not connect"))
 
 
 @contextlib.asynccontextmanager
@@ -406,8 +436,29 @@ async def lifespan(app: FastAPI):
             _after_network(cfg, rep)
         except Exception as exc:   # never take the server down over the AP
             state.set_status("error", f"network bring-up: {exc}")
+        # The CPU settings live in config and are re-applied here rather than by a
+        # unit of their own: sysfs forgets them on every boot, and this task is
+        # already the place that puts the board into the state config asks for.
+        try:
+            await asyncio.to_thread(_apply_cpu_cfg, cfg)
+        except Exception as exc:
+            logging.getLogger("cpu").warning("cpu settings: %s", exc)
 
     asyncio.create_task(_startup_network())
+
+    # Board health on its own clock. The diagnostics log samples the same sysfs,
+    # but only while a ride log is open, and the header has to show a temperature
+    # whether or not anything is being recorded -- or the one moment it matters,
+    # a hot board on the driveway, is the moment it says nothing.
+    async def _cpu_health():
+        while True:
+            try:
+                state.set_cpu(await asyncio.to_thread(system.cpu_status))
+            except Exception:
+                pass
+            await asyncio.sleep(5)
+
+    asyncio.create_task(_cpu_health())
     ecu_id_path = ETC / "ecu_id.json"
     if not ecu_id_path.exists():
         ecu_id_path = REPO_DIR / "config" / "ecu_id.json"
@@ -437,17 +488,19 @@ async def lifespan(app: FastAPI):
         ecu_fields=ecu_fields,
         session_init=cfg.get("testing", {}).get("session_init", True),
         diag=diag,
+        gear_cfg=cfg.get("gear", {}),
     )
     worker.start()
     # the catalog is up by now, so the filter in _norm_presets has something to
     # filter against
-    _presets = _norm_presets(_load_presets())
-    state.set_presets(_presets)
+    _slots, _free = _split_presets_file(_load_presets())
+    _presets = _norm_presets(_slots)
+    state.set_presets(_presets, _free)
     # Restore the selection: what the rider last had wins, then the first preset as
     # the factory default, then the named-default set the worker already applied.
     # The first preset is the default only when there is nothing to remember — it
     # must not wipe a hand-picked set on every reboot.
-    _valid = {c["key"] for c in state.snapshot().get("catalog", [])}
+    _valid = _selectable_keys()
     _sel = _boot_selection(_load_selected(), _presets, _valid)
     if _sel:
         state.set_selected(_sel)
@@ -514,6 +567,111 @@ async def index():
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
+# -- add-ons ---------------------------------------------------------------
+# An add-on is static content and a nameless file store; nothing in it is ever
+# imported. Served by hand rather than by app.mount() so a freshly installed one
+# works without restarting the service — mounting is a start-up act.
+adm = AddonManager(ADDONS_DIR)
+
+
+@app.get("/api/addons")
+async def addons_list():
+    return {"addons": adm.installed()}
+
+
+@app.get("/addons/{name}")
+async def addon_root(name: str):
+    if not adm.dir_of(name):
+        return JSONResponse(status_code=404, content={"error": "err.addon_unknown"})
+    return RedirectResponse("/addons/%s/" % name)
+
+
+@app.get("/addons/{name}/{path:path}")
+async def addon_file(name: str, path: str = ""):
+    p = adm.web_file(name, path)
+    if p is None:
+        return JSONResponse(status_code=404, content={"error": "not found"})
+    return FileResponse(p, media_type=adm.content_type(p), headers={
+        "Cache-Control": "no-cache",
+        # the page is the add-on's, the origin is ours: never let a browser
+        # decide for itself what an unlisted file is
+        "X-Content-Type-Options": "nosniff",
+    })
+
+
+@app.get("/api/addons/{name}/data")
+async def addon_data_list(name: str):
+    if not adm.dir_of(name):
+        return JSONResponse(status_code=404, content={"error": "err.addon_unknown"})
+    return adm.list_data(name)
+
+
+@app.get("/api/addons/{name}/data/{file}")
+async def addon_data_read(name: str, file: str):
+    blob = adm.read_data(name, file)
+    if blob is None:
+        return JSONResponse(status_code=404, content={"error": "not found"})
+    # stored bytes are opaque to the board; handing them back as anything a
+    # browser might run is how a file store becomes an XSS hole
+    return Response(content=blob, media_type="application/octet-stream",
+                    headers={"X-Content-Type-Options": "nosniff"})
+
+
+@app.put("/api/addons/{name}/data/{file}")
+async def addon_data_write(name: str, file: str, request: Request):
+    if not adm.dir_of(name):
+        return JSONResponse(status_code=404, content={"error": "err.addon_unknown"})
+    body = await request.body()
+    if not body:
+        return JSONResponse(status_code=400, content={"error": "err.addon_empty"})
+    err = adm.write_data(name, file, body)
+    if err:
+        return JSONResponse(status_code=400, content={"error": err})
+    return {"name": file, "size": len(body)}
+
+
+@app.delete("/api/addons/{name}/data/{file}")
+async def addon_data_delete(name: str, file: str):
+    if not adm.dir_of(name):
+        return JSONResponse(status_code=404, content={"error": "err.addon_unknown"})
+    err = adm.delete_data(name, file)
+    if err:
+        return JSONResponse(status_code=400, content={"error": err})
+    return {"name": file}
+
+
+@app.post("/api/addons/upload")
+async def addon_upload(file: UploadFile = File(...)):
+    name = file.filename or ""
+    if not any(name.lower().endswith(x) for x in addons_mod.ARCHIVE_SUFFIXES):
+        return JSONResponse(status_code=400, content={"error": "err.addon_bad_archive"})
+    data = await file.read()
+    if len(data) > addons_mod.MAX_ARCHIVE:
+        return JSONResponse(status_code=400, content={"error": "err.addon_too_big"})
+    try:
+        ADDONS_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = ADDONS_DIR / (".upload-%s" % datetime.now().strftime("%Y%m%d-%H%M%S"))
+        tmp.write_bytes(data)
+    except OSError as exc:
+        return JSONResponse(status_code=500, content={"error": "err.addon_failed",
+                                                      "detail": str(exc)})
+    try:
+        installed, err = adm.install(tmp)
+    finally:
+        tmp.unlink(missing_ok=True)
+    if err:
+        return JSONResponse(status_code=400, content={"error": err})
+    return {"ok": True, "name": installed}
+
+
+@app.delete("/api/addons/{name}")
+async def addon_remove(name: str):
+    err = adm.remove(name)
+    if err:
+        return JSONResponse(status_code=404, content={"error": err})
+    return {"ok": True, "name": name}
+
+
 # -- live state ------------------------------------------------------------
 @app.get("/api/state")
 async def get_state():
@@ -545,7 +703,8 @@ async def set_logging(payload: dict):
 
 @app.post("/api/selected")
 async def set_selected(payload: dict):
-    keys = [str(k) for k in payload.get("keys", [])]
+    valid = _selectable_keys()
+    keys = [str(k) for k in payload.get("keys", []) if str(k) in valid]
     state.set_selected(keys)
     if worker is not None:  # also drives decoded-log columns (rolls the file)
         worker.set_selected(keys)
@@ -555,13 +714,21 @@ async def set_selected(payload: dict):
 
 @app.post("/api/presets")
 async def set_presets(payload: dict):
-    """Store the three channel sets the Logger tab switches between. The worker is
-    deliberately not touched: a preset does not change what is polled — applying one
-    goes through /api/selected like any other change of the selection."""
+    """Store the three channel sets the Logger tab switches between, and the notes
+    that go with them. The worker is deliberately not touched: a preset does not
+    change what is polled — applying one goes through /api/selected like any other
+    change of the selection.
+
+    `free_note` belongs to a hand-picked selection, which has no slot to live in:
+    which preset is "active" is derived from the live selection, never stored, so
+    a set that matches none of them still needs somewhere to keep its note.
+    """
     presets = _norm_presets(payload.get("presets", []))
-    state.set_presets(presets)
-    _save_presets(presets)
-    return {"presets": state.snapshot()["presets"]}
+    free = _norm_note(payload.get("free_note", state.snapshot().get("free_note", "")))
+    state.set_presets(presets, free)
+    _save_presets(presets, free)
+    snap = state.snapshot()
+    return {"presets": snap["presets"], "free_note": snap["free_note"]}
 
 
 def _parse_rli(v, default: int) -> int:
@@ -826,10 +993,10 @@ async def firmware_status():
 @app.post("/api/firmware/read")
 async def firmware_read(payload: dict):
     if fwm is None:
-        return JSONResponse(status_code=503, content={"error": "не готово"})
+        return JSONResponse(status_code=503, content={"error": "not ready"})
     name = payload.get("name") or f"dump-{datetime.now():%Y%m%d-%H%M%S}.bin"
     try:
-        name = _safe_name(name if name.endswith(".bin") else name + ".bin")
+        name = safe_name(name if name.endswith(".bin") else name + ".bin")
         fwm.start_read(name, verbose=bool(payload.get("verbose")))
     except (ValueError, RuntimeError) as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
@@ -839,14 +1006,14 @@ async def firmware_read(payload: dict):
 @app.post("/api/firmware/write")
 async def firmware_write(payload: dict):
     if fwm is None:
-        return JSONResponse(status_code=503, content={"error": "не готово"})
+        return JSONResponse(status_code=503, content={"error": "not ready"})
     try:
-        name = _safe_name(payload.get("name", ""))
+        name = safe_name(payload.get("name", ""))
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
     path = fwm.fw_dir / name
     if not path.is_file():
-        return JSONResponse(status_code=404, content={"error": "не найдено"})
+        return JSONResponse(status_code=404, content={"error": "not found"})
     # hard safety gate: refuse to flash anything but an exact-size image
     req = _required_fw_size()
     if path.stat().st_size != req:
@@ -869,32 +1036,32 @@ async def firmware_write(payload: dict):
 async def firmware_check(name: str):
     """Guard verdict without starting anything — lets the UI warn before the POST."""
     if fwm is None:
-        return JSONResponse(status_code=503, content={"error": "не готово"})
+        return JSONResponse(status_code=503, content={"error": "not ready"})
     try:
-        name = _safe_name(name)
+        name = safe_name(name)
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
     if not (fwm.fw_dir / name).is_file():
-        return JSONResponse(status_code=404, content={"error": "не найдено"})
+        return JSONResponse(status_code=404, content={"error": "not found"})
     return _guard_verdict(name)
 
 
 @app.post("/api/firmware/rename")
 async def firmware_rename(payload: dict):
     if fwm is None:
-        return JSONResponse(status_code=503, content={"error": "не готово"})
+        return JSONResponse(status_code=503, content={"error": "not ready"})
     if fwm.status().get("op", "idle") != "idle":
         return JSONResponse(status_code=400, content={"error": "fw_busy"})
     try:
-        src = _safe_name(payload.get("from", ""))
-        dst = _safe_name(payload.get("to", ""))
+        src = safe_name(payload.get("from", ""))
+        dst = safe_name(payload.get("to", ""))
     except ValueError:
         return JSONResponse(status_code=400, content={"error": "fw_bad_name"})
     if not dst.endswith(".bin"):
         dst += ".bin"
     sp = fwm.fw_dir / src
     if not sp.is_file():
-        return JSONResponse(status_code=404, content={"error": "не найдено"})
+        return JSONResponse(status_code=404, content={"error": "not found"})
     dst = _unique_name(fwm.fw_dir, dst)     # never clobber another firmware
     try:
         sp.rename(fwm.fw_dir / dst)
@@ -942,9 +1109,9 @@ async def firmware_cancel():
 @app.post("/api/firmware/upload")
 async def firmware_upload(file: UploadFile = File(...)):
     if fwm is None:
-        return JSONResponse(status_code=503, content={"error": "не готово"})
+        return JSONResponse(status_code=503, content={"error": "not ready"})
     try:
-        name = _safe_name(file.filename or "")
+        name = safe_name(file.filename or "")
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
     fwm.fw_dir.mkdir(parents=True, exist_ok=True)
@@ -966,7 +1133,7 @@ async def firmware_upload(file: UploadFile = File(...)):
         extracted = []
         for m in bins:  # extract ONLY .bin (+ matching .bin.txt) for safety
             try:
-                bn = _safe_name(Path(m).name)
+                bn = safe_name(Path(m).name)
             except ValueError:
                 continue
             final = _unique_name(fwm.fw_dir, bn)
@@ -985,13 +1152,13 @@ async def firmware_upload(file: UploadFile = File(...)):
 @app.post("/api/firmware/desc/{name}")
 async def firmware_desc_save(name: str, payload: dict):
     if fwm is None:
-        return JSONResponse(status_code=503, content={"error": "не готово"})
+        return JSONResponse(status_code=503, content={"error": "not ready"})
     try:
-        name = _safe_name(name)
+        name = safe_name(name)
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
     if not (fwm.fw_dir / name).is_file():
-        return JSONResponse(status_code=404, content={"error": "не найдено"})
+        return JSONResponse(status_code=404, content={"error": "not found"})
     text = str(payload.get("text", ""))
     p = fwm.fw_dir / (name + ".txt")
     if text.strip() == "":            # empty -> drop the description file
@@ -1005,51 +1172,81 @@ async def firmware_desc_save(name: str, payload: dict):
 @app.get("/api/firmware/diff")
 async def firmware_diff(a: str, b: str):
     if fwm is None:
-        return JSONResponse(status_code=503, content={"error": "не готово"})
+        return JSONResponse(status_code=503, content={"error": "not ready"})
     try:
-        a, b = _safe_name(a), _safe_name(b)
+        a, b = safe_name(a), safe_name(b)
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
     pa, pb = fwm.fw_dir / a, fwm.fw_dir / b
     if not pa.is_file() or not pb.is_file():
-        return JSONResponse(status_code=404, content={"error": "не найдено"})
+        return JSONResponse(status_code=404, content={"error": "not found"})
     return {"a": a, "b": b, **_diff_files(pa, pb)}
 
 
 @app.get("/api/firmware/desc/{name}")
 async def firmware_desc(name: str):
     if fwm is None:
-        return JSONResponse(status_code=503, content={"error": "не готово"})
+        return JSONResponse(status_code=503, content={"error": "not ready"})
     try:
-        name = _safe_name(name)
+        name = safe_name(name)
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
     p = fwm.fw_dir / (name + ".txt")
     return {"name": name, "text": p.read_text() if p.is_file() else ""}
 
 
+@app.get("/api/firmware/download")
+def firmware_download_many(names: str = "", zipname: str = "firmware.zip"):
+    """One pick comes back as the image itself, several as a zip.
+
+    Reached by navigating to it, for the same reason the log bundler is: the
+    old UI looped over several synthesized <a download> anchors and iOS
+    delivered at most the first of them.
+
+    A bundle carries each image's `<name>.txt` description too -- a dump is
+    worth little without the notes, and this way a download round-trips back
+    through the uploader unchanged.
+
+    Declared before /api/firmware/files/{name}, which would otherwise match it.
+    """
+    if fwm is None:
+        return JSONResponse(status_code=503, content={"error": "not ready"})
+    wanted = split_names(names)
+    if not wanted:
+        return JSONResponse(status_code=400, content={"error": "nothing to download"})
+    if len(wanted) == 1:
+        p = resolve_in(fwm.fw_dir, wanted[0])
+        if p is None:
+            return JSONResponse(status_code=404, content={"error": "not found"})
+        return FileResponse(p, filename=p.name, media_type="application/octet-stream")
+    entries = flat_entries(fwm.fw_dir, wanted, sidecars=(".txt",))
+    if not entries:
+        return JSONResponse(status_code=404, content={"error": "not found"})
+    return _zip_response(zip_entries(entries), _zipname(zipname, "firmware.zip"))
+
+
 @app.get("/api/firmware/files/{name}")
 async def firmware_download(name: str):
     if fwm is None:
-        return JSONResponse(status_code=503, content={"error": "не готово"})
+        return JSONResponse(status_code=503, content={"error": "not ready"})
     try:
-        name = _safe_name(name)
+        name = safe_name(name)
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
     path = fwm.fw_dir / name
     if not path.is_file():
-        return JSONResponse(status_code=404, content={"error": "не найдено"})
+        return JSONResponse(status_code=404, content={"error": "not found"})
     return FileResponse(path, filename=name, media_type="application/octet-stream")
 
 
 @app.delete("/api/firmware/files/{name}")
 async def firmware_file_delete(name: str):
     if fwm is None:
-        return JSONResponse(status_code=503, content={"error": "не готово"})
+        return JSONResponse(status_code=503, content={"error": "not ready"})
     if fwm.status()["op"] != "idle":
-        return JSONResponse(status_code=409, content={"error": "операция выполняется"})
+        return JSONResponse(status_code=409, content={"error": "operation in progress"})
     try:
-        name = _safe_name(name)
+        name = safe_name(name)
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
     path = fwm.fw_dir / name
@@ -1177,6 +1374,42 @@ async def do_reboot():
 @app.post("/api/system/shutdown")
 async def do_shutdown():
     return system.shutdown()
+
+
+def _apply_cpu_cfg(cfg: dict) -> dict:
+    """Put the board where config says. Empty governor / zero ceiling means the
+    kernel default is left alone, which is what a fresh config asks for."""
+    c = (cfg.get("system", {}) or {}).get("cpu", {}) or {}
+    gov = str(c.get("governor", "") or "")
+    mx = int(c.get("max_khz", 0) or 0)
+    if not gov and not mx:
+        return system.cpu_status()
+    return system.cpu_apply(gov, mx)
+
+
+@app.get("/api/system/cpu")
+async def get_cpu():
+    return system.cpu_status()
+
+
+@app.post("/api/system/cpu")
+async def set_cpu(payload: dict):
+    """Governor and frequency ceiling. Deliberately not routed through
+    /api/config: that path also runs apply_network, and nothing here may touch
+    the AP the UI is served over."""
+    gov = str(payload.get("governor", "") or "")
+    try:
+        mx = int(payload.get("max_khz", 0) or 0)
+    except (TypeError, ValueError):
+        mx = 0
+    res = await asyncio.to_thread(system.cpu_apply, gov, mx)
+    if res.get("ok"):
+        cfg = cm.load()
+        cfg.setdefault("system", {}).setdefault("cpu", {})
+        cfg["system"]["cpu"]["governor"] = gov
+        cfg["system"]["cpu"]["max_khz"] = mx
+        cm.save(cfg)
+    return res
 
 
 def _auto_time_enabled(cfg: dict | None = None) -> bool:
@@ -1355,7 +1588,7 @@ async def update_upload(file: UploadFile = File(...)):
     if upd is None:
         return JSONResponse(status_code=503, content={"error": "\u043d\u0435 \u0433\u043e\u0442\u043e\u0432\u043e"})
     try:
-        name = _safe_name(file.filename or "")
+        name = safe_name(file.filename or "")
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
     if not any(name.lower().endswith(x) for x in (".tar.gz", ".tgz", ".tar", ".zip")):
@@ -1391,32 +1624,67 @@ def update_log_text(lines: int = 400, file: str = ""):
     return _tail_text(Path(upd._vlog_path), lines)
 
 
+def _log_entries(names) -> list[tuple[str, Path]]:
+    """Validated (arcname, path) pairs for the log tree.
+
+    The arcname keeps the day folder, so the zip mirrors the board. Logs do not
+    go through archive.resolve_in: they live two segments deep and _safe_rel is
+    the stricter rule for that shape.
+    """
+    out: list[tuple[str, Path]] = []
+    for raw in names or []:
+        try:
+            rel = _safe_rel(str(raw))
+        except ValueError:
+            continue
+        p = _log_file(rel)
+        if p is not None:
+            out.append((rel, p))
+    return out
+
+
+def _zip_response(blob: bytes, zipname: str) -> Response:
+    return Response(content=blob, media_type="application/zip", headers={
+        "Content-Disposition": f'attachment; filename="{zipname}"',
+        "Content-Length": str(len(blob)),
+    })
+
+
+def _zipname(raw, default: str) -> str:
+    try:
+        name = safe_name(raw or default)
+    except ValueError:
+        name = default
+    return name if name.endswith(".zip") else name + ".zip"
+
+
+@app.get("/api/logs/download")
+def logs_download_get(names: str = "", zipname: str = "k-line.log.zip"):
+    """Same bundle as the POST, reached by navigating to it.
+
+    Safari on iOS ignores a synthesized <a download> and refuses to save a
+    blob: URL, so a fetch-then-save-blob download hands an iPhone nothing at
+    all. A plain GET carrying Content-Disposition is the one shape every
+    browser saves -- which means the bundling has to happen here.
+
+    Declared before /api/logs/{name:path}, which would otherwise swallow it.
+    """
+    entries = _log_entries(split_names(names))
+    if not entries:
+        return JSONResponse(status_code=404, content={"error": "not found"})
+    return _zip_response(zip_entries(entries), _zipname(zipname, "k-line.log.zip"))
+
+
 @app.post("/api/logs/download")
 def logs_download(payload: dict):
     """Bundle the selected logs into one zip and stream it back as an attachment.
 
-    Body: {"names": [...], "zipname": "k-line-....log.zip"}. Names are validated and
-    confined to the log dir; a selected .zip is stored as-is. Sync def -> threadpool.
+    Body: {"names": [...], "zipname": "k-line-....log.zip"}. Kept for anything
+    already calling it; it shares the bundler with the GET above.
     """
-    zipname = _safe_name(payload.get("zipname", "k-line.log.zip"))
-    if not zipname.endswith(".zip"):
-        zipname += ".zip"
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        for raw in payload.get("names", []):
-            try:
-                name = _safe_rel(str(raw))
-            except ValueError:
-                continue
-            p = _log_file(name)
-            if p is not None:
-                # arcname keeps the day folder, so the zip mirrors the board
-                z.write(p, arcname=name)
-    buf.seek(0)
-    return StreamingResponse(
-        buf, media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{zipname}"'},
-    )
+    entries = _log_entries(payload.get("names", []))
+    return _zip_response(zip_entries(entries),
+                         _zipname(payload.get("zipname"), "k-line.log.zip"))
 
 
 @app.get("/api/logs/{name:path}")
@@ -1427,7 +1695,7 @@ async def get_log(name: str):
         return JSONResponse(status_code=400, content={"error": str(exc)})
     path = _log_file(name)
     if path is None:
-        return JSONResponse(status_code=404, content={"error": "не найдено"})
+        return JSONResponse(status_code=404, content={"error": "not found"})
     if name.endswith(".zip"):
         media = "application/zip"
     elif name.endswith(".csv"):
@@ -1445,7 +1713,7 @@ async def delete_log(name: str):
         return JSONResponse(status_code=400, content={"error": str(e)})
     path = _log_file(name)
     if path is None:
-        return JSONResponse(status_code=404, content={"error": "не найдено"})
+        return JSONResponse(status_code=404, content={"error": "not found"})
     path.unlink()
     # an emptied day folder is noise in the list; the root itself stays
     parent = path.parent
@@ -1466,7 +1734,7 @@ async def log_data(name: str):
         return JSONResponse(status_code=400, content={"error": str(e)})
     path = _log_file(name)
     if path is None:
-        return JSONResponse(status_code=404, content={"error": "не найдено"})
+        return JSONResponse(status_code=404, content={"error": "not found"})
     if _log_kind(Path(name).name) != "decoded":
         return JSONResponse(status_code=400, content={"error": "not_decoded"})
     try:

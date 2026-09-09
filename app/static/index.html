@@ -18,6 +18,9 @@
 <body>
   <header class="topbar">
     <div class="brand">🏍️<span class="brand__text"> Onboard Logger</span></div>
+    <!-- The board has no fan and idles ~5 C under its first thermal trip, so the
+         temperature belongs where it is seen without looking for it. -->
+    <div id="cpuTemp" class="cputemp" title="" hidden></div>
     <div id="statusPill" class="pill pill--init">
       <span class="dot"></span>
       <span id="statusText">…</span>
@@ -26,8 +29,8 @@
 
   <nav class="tabs" role="tablist">
     <button class="tab is-active" data-tab="logger" data-i18n="tab.logger" role="tab" aria-selected="true" aria-controls="tab-logger">Logger</button>
-    <button class="tab" data-tab="firmware" data-i18n="tab.firmware" role="tab" aria-selected="false" aria-controls="tab-firmware">Firmware</button>
     <button class="tab" data-tab="logs" data-i18n="tab.files" role="tab" aria-selected="false" aria-controls="tab-logs">K-Line log files</button>
+    <button class="tab" data-tab="firmware" data-i18n="tab.firmware" role="tab" aria-selected="false" aria-controls="tab-firmware">Firmware</button>
     <button class="tab" data-tab="testing" data-i18n="tab.testing" role="tab" aria-selected="false" aria-controls="tab-testing">Testing</button>
     <button class="tab" data-tab="config" data-i18n="tab.config" role="tab" aria-selected="false" aria-controls="tab-config">Config</button>
   </nav>
@@ -90,6 +93,20 @@
         </div>
         <div id="params" class="params" aria-live="polite"></div>
         <p id="paramsEmpty" class="hint" data-i18n="params.viewEmpty" hidden>Nothing picked yet.</p>
+
+        <!-- What the preset is for: how to capture it, not what it holds. Read
+             mode renders it and hides the block when there is nothing written;
+             pick mode is where it gets written. -->
+        <div class="preset-note" id="presetNote" hidden>
+          <div class="preset-note__head">
+            <span data-i18n="note.title">Notes</span>
+            <span class="hint" id="presetNoteWho"></span>
+            <span class="hint preset-note__count" id="presetNoteCount"></span>
+          </div>
+          <div class="preset-note__view" id="presetNoteView"></div>
+          <textarea id="presetNoteEdit" class="preset-note__edit" rows="4" maxlength="4096"
+                    data-i18n-ph="note.placeholder" spellcheck="false" hidden></textarea>
+        </div>
         <p class="hint" data-i18n="params.hint">Checked parameters are shown live. All raw bus frames are always logged.</p>
       </div>
 
@@ -162,9 +179,11 @@
       <div class="card">
         <div class="card__head"><span data-i18n="fw.files">Firmware files on device</span></div>
         <div class="fw-tools">
-          <label class="mini"><span data-i18n="fw.upload">Upload .bin / .zip</span><input id="fwUpload" type="file" accept=".bin,.zip" hidden /></label>
+          <label class="mini"><span data-i18n="fw.upload">Upload .bin / .zip</span><input id="fwUpload" type="file" class="file-pick" /></label>
           <button id="fwDownloadBtn" class="mini" data-i18n="fw.download">Download .bin</button>
           <button id="fwDiffBtn" class="mini" data-i18n="fw.diff">Diff 2 .bin</button>
+          <!-- only when the map viewer add-on is installed; see loadAddons() -->
+          <button id="fwMapBtn" class="mini" data-i18n="fw.showMap" hidden>Show map</button>
           <button id="fwDeleteBtn" class="mini mini--danger" data-i18n="fw.deleteBtn">Delete .bin</button>
         </div>
         <div id="fwDiffResult" class="hint"></div>
@@ -482,25 +501,66 @@
 
         <fieldset class="card">
           <legend data-i18n="cfg.system">System</legend>
-          <label class="inline"><input name="system.auto_time_sync" type="checkbox" />
-            <span data-i18n="cfg.autoTime">Set the clock from the first client after power-up</span></label>
           <label class="inline"><input name="system.fw_guard_override" type="checkbox" />
             <span data-i18n="cfg.fwOverride">Allow writing a firmware that does not match this ECU</span></label>
           <p class="hint" data-i18n="cfg.fwOverrideHint">Off by default. The check compares the calibration in the image with the one the ECU reports and blocks a write only when both are known and belong to different bikes. It cannot tell a good tune from a bad one — it only stops the wrong motorcycle's firmware.</p>
-          <label class="inline"><input name="diag.enabled" type="checkbox" />
-            <span data-i18n="cfg.diag">Board diagnostics log</span></label>
-          <label><span data-i18n="cfg.diagMax">Diagnostics file limit, MB</span>
-            <input name="diag.max_mb" type="number" min="0.05" max="64" step="0.5" /></label>
-          <p class="hint" data-i18n="cfg.diagHint">Records USB, Wi-Fi and K-Line events next to the ride logs: what the kernel says about the adapter, when the link came up or died, and a board snapshot every few seconds. On reaching the limit the file is archived to .zip and a new one starts. The files are listed right below; /api/diag.txt opens the current one as plain text.</p>
+          <!-- The switch, what it does, and the two clocks it compares were three
+               pieces of one subject a dozen blocks apart. -->
+          <div class="update-box">
+            <div class="card__head"><span data-i18n="cfg.clock">Clock</span></div>
+            <div class="time-row">
+              <div class="time-info">
+                <div><span class="k" data-i18n="cfg.timeBoard">Board time</span><span id="timeBoard" class="v">—</span></div>
+                <div><span class="k" data-i18n="cfg.timeBrowser">This device</span><span id="timeBrowser" class="v">—</span></div>
+              </div>
+              <button type="button" id="timeSyncBtn" class="mini" data-i18n="cfg.timeSync">Sync from this device</button>
+            </div>
+            <label class="inline"><input name="system.auto_time_sync" type="checkbox" />
+              <span data-i18n="cfg.autoTime">Set the clock from the first client after power-up</span></label>
+            <p class="hint" data-i18n="cfg.autoTimeHint">The board has no battery-backed clock. With this on, the first browser that opens the UI after a power-up sets the date, time and timezone — once per power-up, and only if the two clocks differ by more than 2 s.</p>
+            <!-- timezone, drift, NTP and where the once-per-power-up shot stands:
+                 too long for the block title, so it closes the block instead -->
+            <div id="timeMeta" class="hint">—</div>
+          </div>
+
+          <!-- No fan in this case: on 2026-09-09 the board idled at 62-65 C with
+               ondemand already holding 408-816 MHz, five degrees under the first
+               thermal trip. Holding the ceiling down buys margin back; it is not
+               a fix for the enclosure. -->
+          <div id="cpuBox" class="update-box cpu-box" hidden>
+            <div class="card__head"><span data-i18n="cfg.cpu">Processor</span>
+              <span id="cpuNow" class="hint">—</span>
+            </div>
+            <div class="cpu-row">
+              <label><span data-i18n="cfg.cpuGov">Governor</span>
+                <select id="cpuGov"></select></label>
+              <label><span data-i18n="cfg.cpuMax">Frequency ceiling</span>
+                <select id="cpuMax"></select></label>
+            </div>
+            <p class="hint" data-i18n="cfg.cpuHint">The load never reaches one core, so a lower ceiling costs nothing measurable and keeps the board further from the temperature at which the kernel starts cutting the clock on its own. An empty value leaves the kernel default alone. The setting is re-applied on every boot.</p>
+          </div>
+          <!-- Every writer asks StorageManager where to write at each file open,
+               so this one choice moves the rides, the board's diagnostics and the
+               firmware and update logs together. It sits above both lists rather
+               than beside either, which would read as a setting for that one. -->
+          <div class="update-box">
+            <div class="card__head"><span data-i18n="storage.title">Log storage</span>
+              <span id="storeNow" class="hint">—</span>
+            </div>
+            <div id="storeList" class="filelist"></div>
+            <div id="storeFree" class="diskfree"></div>
+            <p class="hint" data-i18n="storage.hint">Where every log the board writes goes — rides, the board's own diagnostics, and the firmware and update logs — into a folder per day. Pick a USB drive and they go to it instead of the board's card; if it is not plugged in when recording starts, the board falls back to internal memory so a ride is never lost.</p>
+          </div>
+
           <!-- The board holds no repository and has no internet on the bike, so an
                update arrives as an archive the phone already downloaded. -->
           <div class="update-box">
-            <div class="card__head"><span data-i18n="upd.title">Software</span>
+            <div class="card__head"><span data-i18n="upd.title">Update</span>
               <span id="updVersion" class="hint">—</span>
             </div>
             <p class="hint" data-i18n="upd.hint">Build the archive on the dev host with ./release.sh, download it to this device and pick it here. The board checks the archive, runs its own offline test suite and only then swaps the code in — and puts the old version back by itself if the new one does not come up.</p>
             <div class="fw-tools">
-              <label class="mini" id="updUploadLabel"><span data-i18n="upd.upload">Upload .tar.gz / .zip</span><input id="updUpload" type="file" accept=".tar.gz,.tgz,.tar,.zip" hidden /></label>
+              <label class="mini" id="updUploadLabel"><span data-i18n="upd.upload">Upload .tar.gz / .zip</span><input id="updUpload" type="file" class="file-pick" /></label>
               <button type="button" id="updLogBtn" class="mini" data-i18n="upd.showLog">Log</button>
             </div>
             <div id="updProg" class="fw-prog" hidden>
@@ -511,10 +571,31 @@
             <pre id="updLog" class="fw-log" hidden></pre>
           </div>
 
+          <!-- An add-on is a page the board serves plus a store it keeps for it.
+               No code from it is ever imported; removing one takes its files. -->
+          <div class="update-box">
+            <div class="card__head"><span data-i18n="addon.title">Add-ons</span></div>
+            <p class="hint" data-i18n="addon.hint">An add-on adds a page to this board — the ECU map viewer, for instance, which draws the firmware images stored here. It is content only: nothing in it runs on the board. It keeps its own files beside it, and removing it takes them with it.</p>
+            <div class="fw-tools">
+              <label class="mini" id="addonUploadLabel"><span data-i18n="addon.upload">Install .tar.gz / .zip</span><input id="addonUpload" type="file" class="file-pick" /></label>
+            </div>
+            <div id="addonList" class="logs filelist"></div>
+            <div id="addonState" class="hint"></div>
+          </div>
+
           <div class="board-logs">
             <div class="card__head"><span data-i18n="cfg.boardLogs">Board logs</span>
               <button type="button" id="boardLogsRefresh" class="mini" data-i18n="logs.refresh">refresh</button>
             </div>
+            <!-- the switch names the subject, so the limit beside it needs only
+                 its unit; on a narrow phone the pair wraps to two lines -->
+            <div class="diag-row">
+              <label class="inline"><input name="diag.enabled" type="checkbox" />
+                <span data-i18n="cfg.diag">Board diagnostics log</span></label>
+              <label class="inline diag-lim"><span data-i18n="cfg.diagMax">limit, MB</span>
+                <input name="diag.max_mb" type="number" min="0.05" max="64" step="0.5" /></label>
+            </div>
+            <p class="hint" data-i18n="cfg.diagHint">Records USB, Wi-Fi and K-Line events next to the ride logs: what the kernel says about the adapter, when the link came up or died, and a board snapshot every few seconds. On reaching the limit the file is archived to .zip and a new one starts. The files are listed right below; /api/diag.txt opens the current one as plain text.</p>
             <div class="toolbar">
               <div class="seg" id="boardLogFilter">
                 <button data-f="all" class="on" data-i18n="logs.all">Show all</button>
@@ -540,44 +621,40 @@
             <div id="boardLogsList" class="logs filelist"></div>
             <p class="hint" data-i18n="cfg.boardLogsHint">Two kinds live here, both written by the board rather than by a ride: the diagnostics log (deb) and one file per firmware read or write (fw). Opening a row shows it as text; a .zip is a download only.</p>
           </div>
-          <p class="hint" data-i18n="cfg.autoTimeHint">The board has no battery-backed clock. With this on, the first browser that opens the UI after a power-up sets the date, time and timezone — once per power-up, and only if the two clocks differ by more than 2 s.</p>
-          <div class="time-row">
-            <div class="time-info">
-              <div><span class="k" data-i18n="cfg.timeBoard">Board time</span><span id="timeBoard" class="v">—</span></div>
-              <div><span class="k" data-i18n="cfg.timeBrowser">This device</span><span id="timeBrowser" class="v">—</span></div>
+          <!-- How the UI behaves for whoever is holding the phone. Two of the
+               three are device-local (localStorage): the rider on a sunlit road
+               needs light and the same board at night needs dark, and staying
+               awake is a property of the phone in the cradle, not of the
+               motorcycle. The language is the odd one out -- it belongs to the
+               board, so it follows every phone that connects. -->
+          <div class="update-box">
+            <div class="card__head"><span data-i18n="cfg.appearance">Appearance</span></div>
+            <div class="cpu-row">
+              <label><span data-i18n="cfg.theme">Theme</span>
+                <select id="themeSelect">
+                  <option value="auto" data-i18n="theme.auto">Follow the device</option>
+                  <option value="light" data-i18n="theme.light">Light</option>
+                  <option value="dark" data-i18n="theme.dark">Dark</option>
+                </select>
+              </label>
+              <label><span data-i18n="cfg.locale">Language</span>
+                <select id="localeSelect" name="locale">
+                  <option value="en">English</option>
+                  <option value="de">Deutsch</option>
+                  <option value="es">Español</option>
+                  <option value="fr">Français</option>
+                  <option value="it">Italiano</option>
+                  <option value="nl">Nederlands</option>
+                  <option value="bg">Български</option>
+                  <option value="ru">Русский</option>
+                </select>
+              </label>
             </div>
-            <button type="button" id="timeSyncBtn" class="mini" data-i18n="cfg.timeSync">Sync from this device</button>
+            <label class="inline"><input id="wakeToggle" type="checkbox" />
+              <span data-i18n="cfg.wake">Keep this screen awake</span></label>
+            <p class="hint" id="wakeHint" data-i18n="cfg.wakeHint">Holds the phone awake while this page is open, so a ride does not end with a locked screen. It costs battery, and it is armed by the first touch after the page loads.</p>
+            <p class="hint" data-i18n="cfg.appearanceHint">The theme and the screen setting are remembered by this phone alone; the language belongs to the board and every device that connects sees it.</p>
           </div>
-          <div id="timeMeta" class="hint">—</div>
-          <!-- device-local preference (localStorage), not board config: the rider
-               on a sunlit road needs light, the same board at night needs dark -->
-          <label><span data-i18n="cfg.theme">Appearance</span>
-            <select id="themeSelect">
-              <option value="auto" data-i18n="theme.auto">Follow the device</option>
-              <option value="light" data-i18n="theme.light">Light</option>
-              <option value="dark" data-i18n="theme.dark">Dark</option>
-            </select>
-          </label>
-          <label><span data-i18n="cfg.locale">Language</span>
-            <select id="localeSelect" name="locale">
-              <option value="en">English</option>
-              <option value="de">Deutsch</option>
-              <option value="es">Español</option>
-              <option value="fr">Français</option>
-              <option value="it">Italiano</option>
-              <option value="nl">Nederlands</option>
-              <option value="bg">Български</option>
-              <option value="ru">Русский</option>
-            </select>
-          </label>
-        </fieldset>
-
-        <fieldset class="card">
-          <legend data-i18n="storage.title">Log storage</legend>
-          <div id="storeNow" class="hint">—</div>
-          <div id="storeList" class="filelist"></div>
-          <div id="storeFree" class="diskfree"></div>
-          <p class="hint" data-i18n="storage.hint">Logs are written into a folder per day. Pick a USB drive and they go to it instead of the board's card; if it is not plugged in when recording starts, the board falls back to internal memory so a ride is never lost.</p>
         </fieldset>
 
         <p id="cfgNetDirty" class="hint cfg-dirty" hidden data-i18n="cfg.netDirty">Network settings changed — press “Save &amp; apply” to send them (the AP restarts, you may need to reconnect).</p>

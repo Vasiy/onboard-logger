@@ -1,1 +1,57 @@
-[{"name": "default", "keys": ["rpm", "coolant_t", "throttle", "inj_period"]}, {"name": "Cold+Adj", "keys": ["rpm", "coolant_t", "vbat", "throttle", "idle_target", "idle_step_base", "idle_step_adj", "dwell_f", "dwell_r", "engine_state", "prog_counter"]}, {"name": "Adv+Cut", "keys": ["rpm", "throttle", "coolant_t", "advance", "advance2", "inj_period", "lambda_f", "lambda_int_f", "lambda_reg_f", "lambda_ctl_f", "co_trim"]}]
+{
+ "slots": [
+  {
+   "name": "Switch",
+   "keys": [
+    "rpm",
+    "vbat",
+    "side_stand",
+    "clutch",
+    "neutral",
+    "r74",
+    "r75",
+    "r77",
+    "r79",
+    "r7a"
+   ],
+   "note": "# Switch block 0x74-0x7A\n\nStationary, **engine stopped, ignition on**. No ride needed, five minutes.\n\n`0x76` the side stand and `0x78` the clutch are already settled and sit in the same run of slots -- they are the references: they show that what is next to them really is a set of digital inputs.\n\n## How to capture\n\n1. Record, 10 s of quiet -- that is the zero point.\n2. Work **one** control at a time, hold it 5 s, put it back.\n3. Five seconds of quiet between controls: the pauses are what tells them apart afterwards.\n\nWhat to go through: kill switch, brake light by hand and by foot separately, starter with the kill switch off (it cranks, it does not start), high beam, hazards, indicators, neutral to gear with the clutch pulled, side stand up and down.\n\n## What it settles\n\n`r74` `r75` `r77` `r79` `r7a` -- which byte followed which control. `vbat` is in the set to tell a real input from a sag under load."
+  },
+  {
+   "name": "Idle+6C",
+   "keys": [
+    "rpm",
+    "coolant_t",
+    "throttle",
+    "idle_target",
+    "engine_state",
+    "idle_step_base",
+    "idle_step_adj",
+    "r6c",
+    "r3e",
+    "r57",
+    "r5c",
+    "r62",
+    "co_trim"
+   ],
+   "note": "# Idle stepper and the constant bytes\n\nA cold start and a warm-up to the fan, the bike standing still.\n\n## What is being checked\n\n- **Is `r6c` the sum?** In the 03-09 scan it read 164 with a base of 118 and a trim of 46 -- an exact addition, but from *one* sample. Here all three channels run side by side: if the equality holds through the whole warm-up, the channel is named.\n- `r3e` (52), `r57` (4), `r62` (4), `r5c` (1) stood constant in that single scan. A warm-up from cold shows whether they are constants or merely slow.\n- `co_trim` -- zero across ~6300 samples, but its slot is its **own**, so that is a value rather than a stub. One flicker and the open-loop-variant hypothesis is gone.\n\n## How to capture\n\n1. Engine cold. Record, 30 s before the start.\n2. Start it, sit at idle until the fan comes on.\n3. Blip it to 3000 a couple of times and let it drop.\n4. Stop it **while recording** and give it another 20 s."
+  },
+  {
+   "name": "Unk-w",
+   "keys": [
+    "rpm",
+    "throttle",
+    "coolant_t",
+    "vbat",
+    "engine_state",
+    "r53",
+    "r5d",
+    "r5e",
+    "r5f",
+    "r63",
+    "r6a"
+   ],
+   "note": "# Six word-sized identifiers with no name\n\n`r53` `r5d` `r5e` `r5f` `r63` `r6a` -- each has a slot of its own in the firmware, so the variable is real. But all six read zero in the single scan there is: something has to move them.\n\n## How to capture\n\nAn ordinary ride, but with the extremes:\n\n- long closed-throttle runs down from 4000+ -- engine braking;\n- full throttle to the limiter at least once;\n- a warm-up to the fan and a stand in traffic;\n- a hot restart after ten minutes stopped.\n\n## What to watch for\n\nAny of the six leaving zero for even one sample is the condition, found. Write down what it was, and repeat it to tell a channel from a glitch."
+  }
+ ],
+ "free_note": ""
+}

@@ -264,6 +264,24 @@ def test_a_good_archive_swaps_and_keeps_venv_and_util():
         assert json.loads((tmp / "etc" / "update.json").read_text())["version"] == "v2"
 
 
+def test_an_installed_addon_and_its_files_cross_the_swap():
+    """addons/ is the third thing inside DEST that no release ever ships: the
+    add-on was installed on the board and the files under it are the rider's."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        m = _mgr(tmp, py=_py_stub(tmp, {}))
+        store = m.dest / "addons" / "maps" / "data"
+        store.mkdir(parents=True)
+        (store / "shared.xdf").write_text("<XDFFORMAT/>")
+        (m.dest / "addons" / "maps" / "addon.json").write_text('{"name":"maps"}')
+
+        st = _apply(m, _tar(tmp / "a.tar.gz", {**TREE, "VERSION": "v2\n"}))
+        assert st["result"] == "ok", st["log"]
+        assert (m.dest / "addons" / "maps" / "data" / "shared.xdf").read_text() == "<XDFFORMAT/>"
+        assert not (m.dest / "addons").is_symlink()     # moved, not left as a link
+        assert not (m.prev / "addons").exists()
+
+
 def test_a_stamped_build_outranks_the_bare_release_number():
     """VERSION is the tracked number; BUILD adds the commit and the date and is
     what deploy.sh / release.sh leave in an installed tree."""

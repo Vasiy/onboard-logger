@@ -6,7 +6,11 @@ Wants=network.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/onboard-logger
-ExecStart=/opt/onboard-logger/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 80
+# --no-access-log: the UI polls /api/firmware every 1.5 s and drives /api/state
+# behind the websocket, so the access log is thousands of "200 OK" lines a day —
+# each one a write to the SD card, for a line nobody reads. Errors and the app's
+# own logging are untouched; ride and diag logs are separate files either way.
+ExecStart=/opt/onboard-logger/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 80 --no-access-log
 Restart=always
 RestartSec=3
 # root required: bind :80, sysfs LED, hostapd/dnsmasq/ip/hostnamectl, reboot/poweroff

@@ -48,11 +48,26 @@ What it does, in order:
    binary the firmware read/write shells out to.
 5. **Seeds the runtime config** into `/etc/onboard-logger/`: `config.json`, `params.json`,
    `ecu_id.json` — **only if absent** (`[ -f ] || cp`). See *Layered config* below.
-6. **udev rule** → `/dev/kline`, **NetworkManager** told to leave `wlan0` alone, radio unblocked and
-   the regulatory domain set from `wifi.country`.
+6. **udev rules** — `/dev/kline`; USB runtime power management turned **off** for the OTG root hub,
+   the FTDI cable, the Wi-Fi dongle and the hub carrying them; and a rule that re-applies the AP
+   (address, hostapd, dnsmasq) whenever `wlan0` re-appears after a USB re-enumeration.
+   Autosuspending the dwc2 root hub deadlocks its resume path, which cycles the bus underneath the
+   adapters — that is how an FTDI cable and a dongle drop together mid-ride.
+   **NetworkManager** is told to leave `wlan0` alone, the radio is unblocked and the regulatory
+   domain is set from `wifi.country`.
 7. **hostapd/dnsmasq autostart disabled** — the app brings them up itself once the config is
-   rendered, so their own boot order cannot fail first.
+   rendered, so their own boot order cannot fail first. hostapd also gets a drop-in with
+   `ConditionPathExists=/sys/class/net/wlan0`: without a dongle the unit is skipped instead of
+   waiting 30 s for an interface that will not appear and then restarting forever.
 8. **systemd unit** installed, enabled and started.
+9. **Log discipline** — the journal is capped at 64 MB and the page-cache writeback delay is cut to
+   ~5 s: the bike cuts power at the ignition, so a clean shutdown is the exception. `rsyslog` is
+   narrowed rather than removed: its stock `*.*` rule wrote every line to the card a second time,
+   but the board's own events keep a plain-text copy in `/var/log/onboard-logger.log`, because a
+   power cut can truncate the binary journal where a text line survives.
+10. **The stock image is trimmed** — `multi-user.target` by default, and ModemManager, Bluetooth,
+    `NetworkManager-wait-online` and apt's daily timers are switched off. They cost about ten
+    seconds of every boot and the bike has no internet for them to use.
 
 Then:
 
@@ -229,6 +244,43 @@ mv /opt/onboard-logger.failed/.venv /opt/onboard-logger/.venv   # if the restore
 mv /opt/onboard-logger.failed/bin   /opt/onboard-logger/bin
 systemctl start onboard-logger
 ```
+
+---
+
+## Add-ons
+
+An add-on is a page the board serves and a store it keeps for that page. **No code from an
+add-on ever runs on the board** — it is content only, which is why it can be installed from a
+phone at all. The map viewer is the one that exists: `./release-addon.sh` in `ecu-map-viewer`
+builds `ecu-map-viewer-addon-<version>-<sha>.tar.gz`, and **Config → System → Add-ons** takes it.
+
+Everything an add-on owns lives under one directory:
+
+```
+/opt/onboard-logger/addons/maps/addon.json   name, version, title
+/opt/onboard-logger/addons/maps/web/         the page, served at /addons/maps/
+/opt/onboard-logger/addons/maps/data/        files the add-on keeps, reachable only through the API
+```
+
+The split is deliberate. If stored files sat inside the served tree they would also be
+reachable as static content typed by their extension, and an uploaded `.html` would then run in
+this board's own origin. Served files and stored files are different doors.
+
+`addons/` is the third thing that lives inside `/opt/onboard-logger` but comes from no release —
+`.venv` and `bin/5am_util` are the other two. So `deploy.sh` excludes it (which also protects it
+from `--delete`), and an update moves it across the swap and the rollback carries it back. A
+deploy from the dev host never touches an installed add-on or the files it holds.
+
+**Removing one is `rm -rf` of that single directory**: code and data go together, and nothing of
+it is left anywhere else. The button in Config → System does exactly that, and asks first.
+
+With the map viewer installed, the Firmware tab grows a **Show map** button beside *Diff 2 .bin*:
+tick one or more images, press it, and they open in the viewer. It reuses the tab it already
+opened, so comparing one calibration after another does not leave a trail of windows.
+
+The viewer stores its XDF definitions in the add-on's own store — the logger never learns what an
+`.xdf` is. Drop one into the viewer once and it stays on the board, so a later *Show map* draws
+the maps straight away.
 
 ---
 

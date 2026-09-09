@@ -134,7 +134,7 @@ def test_client_failure_falls_back_to_ap():
                                     "ip": "", "iface_missing": False}
         rep = cm.apply_network(_cfg(wifi__mode="client", wifi__client__ssid="typo"), prev=None)
         assert rep["fallback_to_ap"] is True and rep["client_ok"] is False
-        assert "ассоциаци" in rep["client_error"]
+        assert "associated" in rep["client_error"]
         cmds = " ".join(cm.ran)
         assert "restart hostapd" in cmds            # the AP is back on the air
         assert "systemctl enable hostapd" in cmds   # and survives a reboot
@@ -156,9 +156,9 @@ def test_plan_reports_mode_switch():
         client = _cfg(wifi__mode="client", wifi__client__ssid="home")
         rep = cm.plan(ap, client)
         assert rep["mode"] == "client" and rep["reconnect_required"] is True
-        assert any("клиент" in a for a in rep["applied"])
+        assert any("client" in a for a in rep["applied"])
         back = cm.plan(client, ap)
-        assert back["mode"] == "ap" and any("точка доступа" in a for a in back["applied"])
+        assert back["mode"] == "ap" and any("access point" in a for a in back["applied"])
 
 
 def test_validate_rules():

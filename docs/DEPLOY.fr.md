@@ -50,11 +50,29 @@ Ce qu'elle fait, dans l'ordre :
 5. **Sème la configuration d'exécution** dans `/etc/onboard-logger/` : `config.json`, `params.json`,
    `ecu_id.json` — **seulement si absents** (`[ -f ] || cp`). Voir *Configuration en couches*
    plus bas.
-6. **Règle udev** → `/dev/kline`, **NetworkManager** prié de laisser `wlan0` tranquille, radio
-   débloquée et domaine réglementaire fixé d'après `wifi.country`.
+6. **Règles udev** — `/dev/kline` ; la gestion d'énergie USB à l'exécution **désactivée** pour le
+   hub racine OTG, le câble FTDI, la clé Wi-Fi et le hub qui les porte ; plus une règle qui
+   réapplique le point d'accès (adresse, hostapd, dnsmasq) dès que `wlan0` réapparaît après une
+   réénumération USB. La mise en veille du hub racine dwc2 bloque son propre chemin de reprise et
+   fait cycler le bus sous les adaptateurs — c'est ainsi qu'un câble FTDI et une clé tombent
+   ensemble en pleine route.
+   **NetworkManager** est prié de laisser `wlan0` tranquille, la radio est débloquée et le domaine
+   réglementaire fixé d'après `wifi.country`.
 7. **Démarrage automatique de hostapd/dnsmasq désactivé** — l'application les lève elle-même une fois
    la configuration produite, ainsi leur propre ordre de démarrage ne peut pas échouer avant.
+   hostapd reçoit en plus un drop-in avec `ConditionPathExists=/sys/class/net/wlan0` : sans clé,
+   l'unité est ignorée au lieu d'attendre 30 s une interface qui ne viendra pas, puis de redémarrer
+   sans fin.
 8. **Unité systemd** installée, activée et démarrée.
+9. **Discipline des journaux** — le journal plafonné à 64 Mo et le délai d'écriture différée du
+   cache de pages ramené à ~5 s : la moto coupe le courant à l'allumage, un arrêt propre est
+   l'exception. `rsyslog` est restreint plutôt que supprimé : sa règle `*.*` d'origine écrivait
+   chaque ligne une seconde fois sur la carte, mais les événements propres à la carte gardent une
+   copie en clair dans `/var/log/onboard-logger.log` — une coupure peut tronquer le journal binaire
+   là où une ligne de texte survit.
+10. **L'image d'usine est allégée** — `multi-user.target` par défaut, et ModemManager, Bluetooth,
+    `NetworkManager-wait-online` et les minuteries quotidiennes d'apt désactivés. Ensemble ils
+    coûtent une dizaine de secondes à chaque démarrage, et la moto n'a pas d'internet pour eux.
 
 Ensuite :
 
@@ -236,6 +254,46 @@ mv /opt/onboard-logger.failed/.venv /opt/onboard-logger/.venv   # si la restaur�
 mv /opt/onboard-logger.failed/bin   /opt/onboard-logger/bin
 systemctl start onboard-logger
 ```
+
+---
+
+## Modules
+
+Un module est une page que la carte sert et un stockage qu'elle tient pour cette page. **Aucun code
+d'un module ne s'exécute sur la carte** — ce n'est que du contenu, et c'est bien pour cela qu'il
+peut s'installer depuis un téléphone. Le seul qui existe est le visualiseur de cartographies :
+`./release-addon.sh` dans `ecu-map-viewer` construit
+`ecu-map-viewer-addon-<version>-<sha>.tar.gz`, et **Config → System → Modules** l'accepte.
+
+Tout ce qui appartient à un module tient dans un seul répertoire :
+
+```
+/opt/onboard-logger/addons/maps/addon.json   nom, version, titre
+/opt/onboard-logger/addons/maps/web/         la page, servie sur /addons/maps/
+/opt/onboard-logger/addons/maps/data/        les fichiers du module, seulement via l'API
+```
+
+La séparation est voulue. Si les fichiers stockés se trouvaient dans l'arbre servi, ils seraient
+aussi joignables comme contenu statique typé par leur extension, et un `.html` déposé s'exécuterait
+alors dans l'origine de cette carte. Servir et stocker sont deux portes différentes.
+
+`addons/` est la troisième chose qui vit dans `/opt/onboard-logger` sans venir d'aucune version ;
+les deux autres sont `.venv` et `bin/5am_util`. `deploy.sh` l'exclut donc (ce qui le protège aussi
+de `--delete`), une mise à jour le fait passer de l'autre côté de l'échange et le retour arrière le
+ramène. Un déploiement depuis la machine de développement ne touche jamais un module installé ni
+ses fichiers.
+
+**Le retirer, c'est `rm -rf` de ce seul répertoire** : code et données partent ensemble, et il n'en
+reste rien ailleurs. Le bouton de Config → System fait exactement cela, et demande d'abord.
+
+Avec le visualiseur installé, l'onglet Firmware gagne un bouton **Voir la cartographie** à côté de
+*Diff 2 .bin* : cochez une ou plusieurs images, pressez, elles s'ouvrent dans le visualiseur. Il
+réutilise l'onglet déjà ouvert, si bien que comparer une cartographie après l'autre ne laisse pas
+une traînée de fenêtres.
+
+Le visualiseur range ses définitions XDF dans le stockage du module lui-même — la carte n'apprend
+jamais ce qu'est un `.xdf`. Déposez-en une dans le visualiseur une fois et elle reste sur la carte :
+un *Voir la cartographie* ultérieur dessine aussitôt.
 
 ---
 

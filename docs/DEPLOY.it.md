@@ -50,11 +50,28 @@ Cosa fa, nell'ordine:
 5. **Semina la configurazione di esecuzione** in `/etc/onboard-logger/`: `config.json`,
    `params.json`, `ecu_id.json` — **solo se assenti** (`[ -f ] || cp`). Vedi *Configurazione a
    strati* più avanti.
-6. **Regola udev** → `/dev/kline`, a **NetworkManager** viene detto di lasciare stare `wlan0`, la
-   radio viene sbloccata e il dominio normativo impostato da `wifi.country`.
+6. **Regole udev** — `/dev/kline`; la gestione dell'energia USB a runtime **disattivata** per l'hub
+   radice OTG, il cavo FTDI, la chiavetta Wi-Fi e l'hub che li porta; più una regola che riapplica
+   l'access point (indirizzo, hostapd, dnsmasq) ogni volta che `wlan0` ricompare dopo una
+   rienumerazione USB. Il runtime-suspend dell'hub radice dwc2 inceppa il suo stesso percorso di
+   ripresa e fa ciclare il bus sotto gli adattatori: è così che un cavo FTDI e una chiavetta cadono
+   insieme in mezzo a un giro.
+   A **NetworkManager** viene detto di lasciare stare `wlan0`, la radio viene sbloccata e il dominio
+   normativo impostato da `wifi.country`.
 7. **Avvio automatico di hostapd/dnsmasq disattivato**: l'applicazione li tira su da sé una volta
-   generata la configurazione, così il loro ordine di avvio non può fallire prima.
+   generata la configurazione, così il loro ordine di avvio non può fallire prima. hostapd riceve
+   inoltre un drop-in con `ConditionPathExists=/sys/class/net/wlan0`: senza chiavetta l'unità viene
+   saltata invece di attendere 30 s un'interfaccia che non arriverà e poi riavviarsi all'infinito.
 8. **Unità systemd** installata, abilitata e avviata.
+9. **Disciplina dei log**: il journal limitato a 64 MB e il ritardo di scrittura differita della
+   page cache ridotto a ~5 s: la moto toglie corrente con il quadro, uno spegnimento pulito è
+   l'eccezione. `rsyslog` viene ristretto anziché rimosso: la sua regola `*.*` di serie scriveva
+   ogni riga una seconda volta sulla scheda, ma gli eventi propri della scheda conservano una copia
+   in chiaro in `/var/log/onboard-logger.log`, perché un'interruzione di corrente può troncare il
+   journal binario dove una riga di testo sopravvive.
+10. **L'immagine di fabbrica viene sfoltita**: `multi-user.target` come predefinito, e ModemManager,
+    Bluetooth, `NetworkManager-wait-online` e i timer giornalieri di apt disattivati. Insieme
+    costano una decina di secondi a ogni avvio, e la moto non ha internet per loro.
 
 Poi:
 
@@ -235,6 +252,44 @@ mv /opt/onboard-logger.failed/.venv /opt/onboard-logger/.venv   # se quello ripr
 mv /opt/onboard-logger.failed/bin   /opt/onboard-logger/bin
 systemctl start onboard-logger
 ```
+
+---
+
+## Componenti
+
+Un componente è una pagina che la scheda serve e un archivio che tiene per quella pagina. **Nessun
+codice di un componente viene mai eseguito sulla scheda**: è solo contenuto, ed è proprio per questo
+che si può installare da un telefono. L'unico che esiste è il visualizzatore di mappe:
+`./release-addon.sh` in `ecu-map-viewer` costruisce
+`ecu-map-viewer-addon-<versione>-<sha>.tar.gz`, e lo accetta **Config → System → Componenti**.
+
+Tutto ciò che appartiene a un componente sta in una sola cartella:
+
+```
+/opt/onboard-logger/addons/maps/addon.json   nome, versione, titolo
+/opt/onboard-logger/addons/maps/web/         la pagina, servita su /addons/maps/
+/opt/onboard-logger/addons/maps/data/        i file del componente, solo tramite l'API
+```
+
+La separazione è voluta. Se i file salvati stessero dentro l'albero servito sarebbero raggiungibili
+anche come contenuto statico tipizzato dall'estensione, e un `.html` caricato girerebbe nell'origine
+della scheda stessa. Servire e conservare sono porte diverse.
+
+`addons/` è la terza cosa che vive dentro `/opt/onboard-logger` senza venire da nessuna release; le
+altre due sono `.venv` e `bin/5am_util`. Perciò `deploy.sh` la esclude (il che la protegge anche da
+`--delete`), un aggiornamento la porta oltre lo scambio e il ripristino la riporta indietro. Un
+deploy dalla macchina di sviluppo non tocca mai un componente installato né i suoi file.
+
+**Rimuoverlo è `rm -rf` di quell'unica cartella**: codice e dati se ne vanno insieme, e altrove non
+resta nulla. Il pulsante in Config → System fa esattamente questo, e prima chiede.
+
+Con il visualizzatore installato, la scheda Firmware guadagna un pulsante **Mostra mappa** accanto a
+*Diff 2 .bin*: spunta una o più immagini, premi, e si aprono nel visualizzatore. Riusa la scheda già
+aperta, così confrontare una calibrazione dopo l'altra non lascia una scia di finestre.
+
+Le sue definizioni XDF il visualizzatore le tiene nell'archivio del componente stesso: la scheda non
+impara mai cosa sia un `.xdf`. Lasciacene una dentro una volta e resta sulla scheda, così un *Mostra
+mappa* successivo disegna subito.
 
 ---
 

@@ -51,11 +51,29 @@ Was es tut, der Reihe nach:
 5. **Legt die Laufzeitkonfiguration an** unter `/etc/onboard-logger/`: `config.json`, `params.json`,
    `ecu_id.json` — **nur wenn nicht vorhanden** (`[ -f ] || cp`). Siehe *Geschichtete Konfiguration*
    weiter unten.
-6. **udev-Regel** → `/dev/kline`, **NetworkManager** lässt `wlan0` in Ruhe, Funk entsperrt und die
-   Regulierungsdomäne aus `wifi.country` gesetzt.
+6. **udev-Regeln** — `/dev/kline`; die USB-Laufzeit-Energieverwaltung **abgeschaltet** für den
+   OTG-Root-Hub, das FTDI-Kabel, den WLAN-Stick und den Hub, der beide trägt; dazu eine Regel, die
+   den Access Point (Adresse, hostapd, dnsmasq) neu setzt, sobald `wlan0` nach einer
+   USB-Neuanmeldung wieder auftaucht. Der Runtime-Suspend des dwc2-Root-Hubs verklemmt dessen
+   eigenen Resume-Pfad und lässt den Bus unter den Adaptern durchlaufen — so fallen FTDI-Kabel und
+   Stick mitten in der Fahrt gemeinsam aus.
+   **NetworkManager** lässt `wlan0` in Ruhe, Funk entsperrt und die Regulierungsdomäne aus
+   `wifi.country` gesetzt.
 7. **Autostart von hostapd/dnsmasq abgeschaltet** — die App startet sie selbst, sobald die
    Konfiguration erzeugt ist, damit deren eigene Startreihenfolge nicht vorher scheitern kann.
+   hostapd bekommt zusätzlich ein Drop-in mit `ConditionPathExists=/sys/class/net/wlan0`: ohne
+   Stick wird die Unit übersprungen, statt 30 s auf ein Interface zu warten, das nicht kommt, und
+   danach endlos neu zu starten.
 8. **systemd-Unit** installiert, aktiviert und gestartet.
+9. **Log-Disziplin** — das Journal auf 64 MB begrenzt und die Rückschreibverzögerung des
+   Seiten-Caches auf ~5 s verkürzt: das Motorrad trennt den Strom über die Zündung, ein sauberes
+   Herunterfahren ist die Ausnahme. `rsyslog` wird eingeengt statt entfernt: seine
+   `*.*`-Standardregel schrieb jede Zeile ein zweites Mal auf die Karte, doch die eigenen Ereignisse
+   des Boards behalten eine Klartextkopie in `/var/log/onboard-logger.log` — ein Stromausfall kann
+   das binäre Journal abschneiden, wo eine Textzeile überlebt.
+10. **Das Werksimage wird abgespeckt** — `multi-user.target` als Standard, ModemManager, Bluetooth,
+    `NetworkManager-wait-online` und die täglichen apt-Timer abgeschaltet. Zusammen kosten sie rund
+    zehn Sekunden jedes Starts, und das Motorrad hat kein Internet für sie.
 
 Danach:
 
@@ -237,6 +255,45 @@ mv /opt/onboard-logger.failed/.venv /opt/onboard-logger/.venv   # falls der zur�
 mv /opt/onboard-logger.failed/bin   /opt/onboard-logger/bin
 systemctl start onboard-logger
 ```
+
+---
+
+## Add-ons
+
+Ein Add-on ist eine Seite, die das Board ausliefert, und ein Speicher, den es für diese Seite
+führt. **Kein Code eines Add-ons läuft jemals auf dem Board** — es ist reiner Inhalt, und nur
+deshalb lässt es sich überhaupt vom Telefon aus installieren. Das eine, das es gibt, ist der
+Kennfeld-Viewer: `./release-addon.sh` in `ecu-map-viewer` baut
+`ecu-map-viewer-addon-<version>-<sha>.tar.gz`, und **Config → System → Add-ons** nimmt es an.
+
+Alles, was einem Add-on gehört, liegt in einem Verzeichnis:
+
+```
+/opt/onboard-logger/addons/maps/addon.json   Name, Version, Titel
+/opt/onboard-logger/addons/maps/web/         die Seite, ausgeliefert unter /addons/maps/
+/opt/onboard-logger/addons/maps/data/        Dateien des Add-ons, nur über die API erreichbar
+```
+
+Die Trennung ist Absicht. Lägen gespeicherte Dateien im ausgelieferten Baum, wären sie auch als
+statischer Inhalt erreichbar, typisiert nach ihrer Endung — und eine hochgeladene `.html` liefe
+dann im Origin dieses Boards. Ausgelieferte und gespeicherte Dateien sind verschiedene Türen.
+
+`addons/` ist das dritte, was in `/opt/onboard-logger` liegt und aus keinem Release stammt; die
+anderen beiden sind `.venv` und `bin/5am_util`. Deshalb schließt `deploy.sh` es aus (was es auch
+vor `--delete` schützt), ein Update trägt es über den Tausch und das Rollback bringt es zurück.
+Ein Deploy vom Dev-Host rührt ein installiertes Add-on und seine Dateien nie an.
+
+**Entfernen ist `rm -rf` dieses einen Verzeichnisses**: Code und Daten gehen zusammen, sonst
+bleibt nichts davon übrig. Der Knopf in Config → System tut genau das und fragt vorher.
+
+Mit installiertem Kennfeld-Viewer bekommt der Firmware-Reiter einen Knopf **Kennfeld zeigen**
+neben *Diff 2 .bin*: ein oder mehrere Abbilder anhaken, drücken, und sie öffnen sich im Viewer.
+Er benutzt den bereits geöffneten Tab weiter, sodass ein Vergleich nach dem anderen keine Spur
+von Fenstern hinterlässt.
+
+Seine XDF-Definitionen legt der Viewer im eigenen Speicher des Add-ons ab — der Logger erfährt nie,
+was eine `.xdf` ist. Einmal hineingezogen, bleibt sie auf dem Board, und ein späteres *Kennfeld
+zeigen* zeichnet sofort.
 
 ---
 

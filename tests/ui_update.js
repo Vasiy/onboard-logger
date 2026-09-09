@@ -145,7 +145,11 @@ test("the panel is markup, not injected by script", () => {
                     "updFill", "updVal", "updLog", "updLogBtn"]) {
     has(html, `id="${id}"`);
   }
-  has(html, 'accept=".tar.gz,.tgz,.tar,.zip"');
+  // deliberately no accept filter: iOS resolves extensions through UTIs and
+  // greys the archive out under one, so pickedFile() checks the suffix in JS
+  // instead (tests/ui_downloads.js holds that rule for all three pickers)
+  assert(!/id="updUpload"[^>]*accept=/.test(html),
+         "the update picker must carry no accept filter");
 });
 
 test("every locale carries the update panel's strings", () => {

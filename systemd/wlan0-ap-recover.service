@@ -1,0 +1,7 @@
+[Unit]
+Description=Re-apply wlan0 AP (IP + hostapd + dnsmasq) after USB re-enumeration
+After=onboard-logger.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/wlan0-ap-recover.sh
