@@ -1513,10 +1513,17 @@ function buildConfigPayload(only) {
 
 // a fetch that never reached the board reports a bare "Load failed"/"Failed to
 // fetch"; say what that actually means (service restarting, AP bounced, cable out)
+// The applied report arrives as {k, v}: an i18n key and the value that makes
+// it concrete. A plain string is what an older board sends -- keep reading it.
+const actText = (a) =>
+  (typeof a === "string" ? a : t(a.k) + (a.v ? ": " + a.v : ""));
+
 function cfgErrText(err) {
   const m = String(err && err.message);
-  return /load failed|failed to fetch|networkerror/i.test(m)
-    ? t("cfg.unreachable") : t("banner.error") + " " + m;
+  if (/load failed|failed to fetch|networkerror/i.test(m)) return t("cfg.unreachable");
+  // the message is an i18n key; the values that make it concrete ride in detail
+  const d = err && err.detail ? " (" + err.detail + ")" : "";
+  return t("banner.error") + " " + t(m) + d;
 }
 
 function showCfgBanner(cls, html, autoHideMs) {
@@ -1559,7 +1566,7 @@ async function autoSaveField(el) {
       body: JSON.stringify(buildConfigPayload("plain")),
     });
     cfgLoaded = await api("/api/config");
-    const what = (rep.applied || []).join(", ");
+    const what = (rep.applied || []).map(actText).join(", ");
     showCfgBanner("ok", `<b>${t("cfg.saved")}</b>${what ? " — " + what : ""}`, 3000);
   } catch (err) {
     showCfgBanner("err", cfgErrText(err));
@@ -1575,7 +1582,7 @@ $("#cfgForm").addEventListener("submit", async (e) => {
       body: JSON.stringify(buildConfigPayload()),
     });
     let cls = "ok", lines = [`<b>${t("cfg.saved")}</b>`];
-    if (rep.applied?.length) lines.push(`${t("apply.applied")}<ul>` + rep.applied.map((a) => `<li>${a}</li>`).join("") + "</ul>");
+    if (rep.applied?.length) lines.push(`${t("apply.applied")}<ul>` + rep.applied.map((a) => `<li>${esc(actText(a))}</li>`).join("") + "</ul>");
     if (rep.iface_missing) lines.push(t("cfg.noIface"));
     if (rep.reconnect_required) { cls = "warn"; lines.push(`${t("apply.reconnect")} <b>http://${rep.ap_ip}</b>`); }
     if (rep.reboot_recommended) { cls = "warn"; lines.push(t("apply.reboot")); }
@@ -1923,7 +1930,7 @@ $("#logsPreviewBtn").addEventListener("click", async () => {
     const d = await api(logUrl(name) + "/data");
     openChart(name, d.text);
   } catch (e) {
-    toast(e.message === "too_large" ? t("logs.tooLarge") : t("banner.error") + " " + e.message, "err");
+    toast(t("banner.error") + " " + t(e.message), "err");
   }
 });
 
@@ -2636,10 +2643,9 @@ $("#fwWriteBtn").addEventListener("click", async () => {
     await api("/api/firmware/write", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, verbose }) });
     loadFirmware();
   } catch (e) {
-    const msg = e.message === "size_mismatch" ? t("fw.sizeMismatch")
-      : e.message.startsWith("fw_") ? t("fw.guard." + e.message.slice(3))
-      : t("banner.error") + " " + e.message;
-    toast(msg, "err");
+    // every one of these is an i18n key now: the plain errors, the guard
+    // verdicts and the size refusal alike
+    toast(t("banner.error") + " " + t(e.message), "err");
   }
 });
 $("#fwDeleteBtn").addEventListener("click", async () => {
@@ -2656,13 +2662,9 @@ $("#fwCancel").addEventListener("click", async () => {
   try { await api("/api/firmware/cancel", { method: "POST" }); loadFirmware(); } catch (e) {}
 });
 // ---------- calibration catalog ----------
-const CAT_ERR = {
-  fw_catalog_readonly: "fw.catalogReadonly",
-  fw_catalog_seed: "fw.catalogSeed",
-  fw_bad_code: "fw.catalogNeedCode",
-};
-const catErr = (err) =>
-  CAT_ERR[err.message] ? t(CAT_ERR[err.message]) : t("banner.error") + " " + err.message;
+// The board answers with i18n keys, so there is nothing to map: t() resolves
+// them, and falls back to the key itself if one is ever missing.
+const catErr = (err) => t("banner.error") + " " + t(err.message);
 
 // A few hundred entries, so the catalog is a collapsed tree — manufacturer, then
 // model, then the codes — with a search that filters by the firmware code. A
@@ -2846,10 +2848,7 @@ $("#fwUpload").addEventListener("change", async (e) => {
   fd.append("file", file);
   try { await api("/api/firmware/upload", { method: "POST", body: fd }); loadFirmware(); }
   catch (err) {
-    const msg = err.message === "no_firmware_in_zip" ? t("fw.noFilesInZip")
-      : err.message === "bad_zip" ? t("fw.badZip")
-      : t("banner.error") + " " + err.message;
-    toast(msg, "err");
+    toast(t("banner.error") + " " + t(err.message), "err");
   }
 });
 

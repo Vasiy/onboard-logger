@@ -27,7 +27,7 @@ def safe_name(name: str) -> str:
     """
     base = Path(name).name
     if not base or base in (".", "..") or not all(c.isalnum() or c in "._-" for c in base):
-        raise ValueError("bad file name")
+        raise ValueError("err.bad_name")
     return base
 
 

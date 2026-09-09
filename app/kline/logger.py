@@ -327,7 +327,7 @@ class KLineWorker(threading.Thread):
                 elif name == "actuator":
                     r = self._act_on(session, int(arg[0]), float(arg[1]), str(arg[2]))
                 else:
-                    r = {"ok": False, "error": "unknown command"}
+                    r = {"ok": False, "error": "err.unknown_command"}
                 if mode is not None:
                     r["mode"] = mode
         except NegativeResponse as e:

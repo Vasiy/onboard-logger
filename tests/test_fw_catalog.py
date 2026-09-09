@@ -100,7 +100,7 @@ def test_upsert_round_trips_and_marks_the_entry_as_user():
 
 def test_upsert_rejects_an_empty_code():
     with tempfile.TemporaryDirectory() as tmp:
-        assert fw_catalog.upsert({"code": "  "}, Path(tmp) / "e.json")["error"] == "fw_bad_code"
+        assert fw_catalog.upsert({"code": "  "}, Path(tmp) / "e.json")["error"] == "fw.catalogNeedCode"
 
 
 def test_remove_only_touches_user_entries():
@@ -108,7 +108,7 @@ def test_remove_only_touches_user_entries():
         seed = _seed(tmp, [{"code": "SEEDED", "space": "image", "brand": "S"}])
         etc = Path(tmp) / "etc.json"
         fw_catalog.upsert({"code": "MINE", "space": "image", "brand": "M"}, etc)
-        assert fw_catalog.remove("SEEDED", "image", etc)["error"] == "fw_catalog_seed"
+        assert fw_catalog.remove("SEEDED", "image", etc)["error"] == "fw.catalogSeed"
         assert fw_catalog.match("SEEDED", fw_catalog.load_catalog(seed, etc))["brand"] == "S"
         assert fw_catalog.remove("MINE", "image", etc)["ok"] is True
         assert fw_catalog.match("MINE", fw_catalog.load_catalog(seed, etc)) == {}

@@ -120,7 +120,7 @@ def upsert(entry: dict, etc_path: str | Path) -> dict:
     """Write one user entry into the overlay. Returns {"ok": bool, "error": str}."""
     code = str(entry.get("code", "")).strip().upper()
     if not code:
-        return {"ok": False, "error": "fw_bad_code"}
+        return {"ok": False, "error": "fw.catalogNeedCode"}
     space = str(entry.get("space", "image"))
     row = {
         "code": code,
@@ -141,7 +141,7 @@ def upsert(entry: dict, etc_path: str | Path) -> dict:
         p.write_text(json.dumps({"version": 1, "entries": rows},
                                 ensure_ascii=False, indent=2) + "\n")
     except OSError:
-        return {"ok": False, "error": "fw_catalog_readonly"}
+        return {"ok": False, "error": "fw.catalogReadonly"}
     return {"ok": True, "entry": row}
 
 
@@ -152,10 +152,10 @@ def remove(code: str, space: str, etc_path: str | Path) -> dict:
     rows = _entries(p)
     keep = [e for e in rows if _key(e) != want]
     if len(keep) == len(rows):
-        return {"ok": False, "error": "fw_catalog_seed"}
+        return {"ok": False, "error": "fw.catalogSeed"}
     try:
         p.write_text(json.dumps({"version": 1, "entries": keep},
                                 ensure_ascii=False, indent=2) + "\n")
     except OSError:
-        return {"ok": False, "error": "fw_catalog_readonly"}
+        return {"ok": False, "error": "fw.catalogReadonly"}
     return {"ok": True}

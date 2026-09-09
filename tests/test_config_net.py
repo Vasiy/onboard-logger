@@ -156,9 +156,11 @@ def test_plan_reports_mode_switch():
         client = _cfg(wifi__mode="client", wifi__client__ssid="home")
         rep = cm.plan(ap, client)
         assert rep["mode"] == "client" and rep["reconnect_required"] is True
-        assert any("client" in a for a in rep["applied"])
+        # the report is i18n keys with their values beside them, not sentences
+        assert any(a["k"] == "apply.wifiClient" for a in rep["applied"]), rep["applied"]
         back = cm.plan(client, ap)
-        assert back["mode"] == "ap" and any("access point" in a for a in back["applied"])
+        assert back["mode"] == "ap"
+        assert any(a["k"] == "apply.wifiAp" for a in back["applied"]), back["applied"]
 
 
 def test_validate_rules():

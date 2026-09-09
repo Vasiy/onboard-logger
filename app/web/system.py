@@ -18,7 +18,7 @@ _auto_done_fallback = False      # dev hosts without a writable /run
 def _run_detached(cmd: list[str]) -> dict:
     exe = shutil.which(cmd[0])
     if exe is None:
-        return {"ok": False, "message": f"no {cmd[0]} (dev host?)"}
+        return {"ok": False, "message": "err.no_binary"}
     try:
         # fire-and-forget: the box goes down before the request would return
         subprocess.Popen(cmd)

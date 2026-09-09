@@ -49,6 +49,29 @@ def _deep_merge(base: dict, over: dict) -> dict:
     return out
 
 
+
+
+def _act(key: str, value: str = "") -> dict:
+    """One line of the applied report: an i18n key, plus the value that makes it
+    concrete when there is one. The UI translates the key and appends the value,
+    so a hostname or an SSID does not have to be baked into a sentence."""
+    return {"k": key, "v": str(value)}
+
+
+class ConfigError(ValueError):
+    """A validation failure the UI can translate.
+
+    The message is an i18n key; the values that make it concrete -- which
+    gateway, which subnet -- ride in `detail`, which the API already carries and
+    the banner already appends. Baking them into the sentence is what made these
+    untranslatable in the first place.
+    """
+
+    def __init__(self, key: str, detail: str = ""):
+        super().__init__(key)
+        self.detail = detail
+
+
 class ConfigManager:
     def __init__(
         self,
@@ -99,30 +122,30 @@ class ConfigManager:
         wifi = cfg["wifi"]
         mode = self.mode(cfg)
         if wifi.get("mode", "ap") not in ("ap", "client"):
-            raise ValueError("Wi-Fi mode: ap or client")
+            raise ConfigError("cfgerr.wifi_mode")
         if not (1 <= len(wifi["ssid"]) <= 32):
-            raise ValueError("SSID must be 1..32 characters")
+            raise ConfigError("cfgerr.ssid_len")
         pw = wifi.get("password", "")
         if pw and not (8 <= len(pw) <= 63):
-            raise ValueError("WPA2 password must be 8..63 characters (empty = open network)")
+            raise ConfigError("cfgerr.ap_password")
         if not (1 <= int(wifi["channel"]) <= 14):
-            raise ValueError("Wi-Fi channel must be 1..14")
+            raise ConfigError("cfgerr.channel")
 
         client = wifi.get("client", {})
         if mode == "client":
             if not (1 <= len(client.get("ssid", "")) <= 32):
-                raise ValueError("Network to join: give an SSID")
+                raise ConfigError("cfgerr.client_ssid")
             cpw = client.get("password", "")
             if cpw and not (8 <= len(cpw) <= 63):
-                raise ValueError("Network password must be 8..63 characters (empty = open)")
+                raise ConfigError("cfgerr.client_password")
             if str(client.get("ipv4", "dhcp")) not in ("dhcp", "static"):
-                raise ValueError("Client address: dhcp or static")
+                raise ConfigError("cfgerr.client_ipv4")
             if str(client.get("ipv4", "dhcp")) == "static":
                 cip = ipaddress.ip_address(client.get("ip", ""))
                 cnet = ipaddress.ip_network(f"{cip}/{int(client.get('prefix', 24))}", strict=False)
                 gw = client.get("gateway", "")
                 if gw and ipaddress.ip_address(gw) not in cnet:
-                    raise ValueError(f"Gateway {gw} is outside subnet {cnet}")
+                    raise ConfigError("cfgerr.gw_outside", f"{gw} / {cnet}")
                 for d in str(client.get("dns", "")).replace(",", " ").split():
                     ipaddress.ip_address(d)   # raises on junk
 
@@ -132,40 +155,40 @@ class ConfigManager:
         subnet = ipaddress.ip_network(f"{ap_ip}/{prefix}", strict=False)
         ap_gw = net.get("gateway", "")
         if ap_gw and ipaddress.ip_address(ap_gw) not in subnet:
-            raise ValueError(f"Router address {ap_gw} is outside subnet {subnet}")
+            raise ConfigError("cfgerr.ap_gw_outside", f"{ap_gw} / {subnet}")
 
         dhcp = cfg["dhcp"]
         if dhcp["enabled"]:
             start = ipaddress.ip_address(dhcp["pool_start"])
             end = ipaddress.ip_address(dhcp["pool_end"])
             if start > end:
-                raise ValueError("DHCP pool start is above its end")
+                raise ConfigError("cfgerr.pool_order")
             for ip in (start, end):
                 if ip not in subnet:
-                    raise ValueError(f"Pool address {ip} is outside subnet {subnet}")
+                    raise ConfigError("cfgerr.pool_outside", f"{ip} / {subnet}")
             if ap_ip in {start, end} or start <= ap_ip <= end:
-                raise ValueError("The access point IP must not fall inside the DHCP pool")
+                raise ConfigError("cfgerr.ap_in_pool")
 
         host = cfg.get("hostname", "")
         if host and not all(c.isalnum() or c == "-" for c in host):
-            raise ValueError("Hostname: letters, digits and hyphen only")
+            raise ConfigError("cfgerr.hostname")
 
         country = wifi.get("country", "")
         if not (len(country) == 2 and country.isalpha()):
-            raise ValueError("Country code: 2 letters (DE, for instance)")
+            raise ConfigError("cfgerr.country")
 
         baud = cfg.get("kline", {}).get("baud", "auto")
         if str(baud).lower() != "auto":
             try:
                 b = int(baud)
             except (TypeError, ValueError):
-                raise ValueError("Bus speed: Auto or a number")
+                raise ConfigError("cfgerr.baud_kind")
             if not (300 <= b <= 115200):
-                raise ValueError("Bus speed outside 300..115200")
+                raise ConfigError("cfgerr.baud_range")
 
         locale = cfg.get("locale", "en")
         if locale not in {"en", "de", "es", "fr", "it", "nl", "bg", "ru"}:
-            raise ValueError(f"Unknown locale: {locale}")
+            raise ConfigError("cfgerr.locale", str(locale))
 
         # the diagnostics log shares the SD card with the ride logs: a limit of
         # 0 would rotate on every line, a huge one fills the card
@@ -173,18 +196,18 @@ class ConfigManager:
         try:
             mb = float(mb)
         except (TypeError, ValueError):
-            raise ValueError("Diagnostics file size: a number in MB")
+            raise ConfigError("cfgerr.diag_kind")
         if not (0.05 <= mb <= 64):
-            raise ValueError("Diagnostics file size: 0.05..64 MB")
+            raise ConfigError("cfgerr.diag_range")
 
         # the log destination is picked through /api/storage (which has to mount
         # something); this only stops a hand-edited config.json from arriving
         st = cfg.get("storage", {})
         if st.get("dest", "internal") not in ("internal", "usb"):
-            raise ValueError("Log destination: internal or usb")
+            raise ConfigError("cfgerr.storage_dest")
         mp = str(st.get("mount_point", "/media/usb0"))
         if not mp.startswith("/") or ".." in mp:
-            raise ValueError("Mount point: an absolute path")
+            raise ConfigError("cfgerr.mount_point")
 
     # -- rendering ---------------------------------------------------------
     def render_hostapd(self, cfg: dict) -> str:
@@ -303,7 +326,7 @@ class ConfigManager:
         self._run(["ip", "addr", "flush", "dev", self.iface], msgs)
         self._run(["ip", "link", "set", self.iface, "up"], msgs)
         self._run(["systemctl", "restart", f"wpa_supplicant@{self.iface}"], msgs)
-        applied.append(f"Wi-Fi mode -> client ({ssid})")
+        applied.append(_act("apply.wifiClient", ssid))
 
         static = str(client.get("ipv4", "dhcp")) == "static"
         if static:
@@ -315,10 +338,11 @@ class ConfigManager:
             dns = str(client.get("dns", "")).replace(",", " ").split()
             if dns:
                 self._run(["resolvectl", "dns", self.iface, *dns], msgs)
-            applied.append(f"Static address -> {client.get('ip', '')}/{client.get('prefix', 24)}")
+            applied.append(_act("apply.staticAddr",
+                                f"{client.get('ip', '')}/{client.get('prefix', 24)}"))
         else:
             self._run(["dhcpcd", "-b", self.iface], msgs)
-            applied.append("Address by DHCP")
+            applied.append(_act("apply.dhcpAddr"))
 
         ok, why = self.wait_client_up()
         report = {
@@ -394,8 +418,9 @@ class ConfigManager:
         elif mode == "client":
             client = cfg["wifi"].get("client", {})
             if d["wifi"]:
-                applied.append(f"Wi-Fi mode -> client ({client.get('ssid', '')})")
-                applied.append("Static address" if client.get("ipv4") == "static" else "Address by DHCP")
+                applied.append(_act("apply.wifiClient", client.get("ssid", "")))
+                applied.append(_act("apply.staticAddr" if client.get("ipv4") == "static"
+                                    else "apply.dhcpAddr"))
             return {
                 "applied": applied,
                 "messages": [],
@@ -406,26 +431,26 @@ class ConfigManager:
                 "ap_ip": cfg["network"]["ap_ip"],
             }
         if d["wifi"]:
-            applied.append("Wi-Fi mode -> access point" if mode_changed else "Wi-Fi (hostapd)")
+            applied.append(_act("apply.wifiAp" if mode_changed else "apply.hostapd"))
         if d["ip"]:
-            applied.append(f"Access point IP -> {cfg['network']['ap_ip']}")
+            applied.append(_act("apply.apIp", cfg["network"]["ap_ip"]))
         if d["dhcp"] or d["ip"]:
-            applied.append("DHCP on" if cfg["dhcp"]["enabled"] else "DHCP off")
+            applied.append(_act("apply.dhcpOn" if cfg["dhcp"]["enabled"] else "apply.dhcpOff"))
         if d["hostname"] and cfg.get("hostname"):
-            applied.append(f"Hostname → {cfg['hostname']}")
+            applied.append(_act("apply.hostname", cfg["hostname"]))
         # non-network changes (applied live by main.post_config)
         pk = (prev or {}).get("kline", {})
         nk = cfg.get("kline", {})
         if prev is None or pk.get("baud") != nk.get("baud"):
-            applied.append(f"Bus speed -> {nk.get('baud')}")
+            applied.append(_act("apply.baud", nk.get("baud")))
         if prev is None or pk.get("echo") != nk.get("echo"):
-            applied.append("K-Line echo")
+            applied.append(_act("apply.echo"))
         if prev is None or pk.get("init") != nk.get("init"):
-            applied.append(f"Init K-Line → {nk.get('init', 'fast')}")
+            applied.append(_act("apply.klineInit", nk.get("init", "fast")))
         if prev is not None and prev.get("logging") != cfg.get("logging"):
-            applied.append("Default logging")
+            applied.append(_act("apply.logging"))
         if prev is not None and prev.get("locale") != cfg.get("locale"):
-            applied.append(f"Language -> {cfg.get('locale')}")
+            applied.append(_act("apply.locale", cfg.get("locale")))
         return {
             "applied": applied,
             "messages": [],
@@ -479,7 +504,7 @@ class ConfigManager:
             rep = self._apply_client(cfg, msgs, applied)
             if host_changed and cfg.get("hostname"):
                 self.set_hostname(cfg["hostname"], msgs)
-                applied.append(f"Hostname → {cfg['hostname']}")
+                applied.append(_act("apply.hostname", cfg["hostname"]))
                 rep["reboot_recommended"] = True
             return rep
 
@@ -493,7 +518,7 @@ class ConfigManager:
             self._stop_client(msgs)
             self._run(["systemctl", "enable", "hostapd"], msgs)
             if prev is not None:
-                applied.append("Wi-Fi mode -> access point")
+                applied.append(_act("apply.wifiAp"))
 
         # 1. hostapd (SSID / passphrase / channel) — auto-pick the quietest
         #    channel first (scan needs the radio free, so stop hostapd)
@@ -510,8 +535,8 @@ class ConfigManager:
                     self.last_scan_ts = time.time()
                     render_cfg = copy.deepcopy(cfg)
                     render_cfg["wifi"]["channel"] = chosen
-                    m = f"auto channel {chosen} (APs nearby: {info.get('aps_seen', '?')})"
-                    applied.append(m)
+                    m = f"{chosen} (APs nearby: {info.get('aps_seen', '?')})"
+                    applied.append(_act("apply.autoChannel", m))
                     print(f"[wifi] {m} {info.get('candidates', '')}", flush=True)
                 else:
                     msgs.append(
@@ -520,13 +545,13 @@ class ConfigManager:
                     )
             self._write_conf(self.hostapd_conf, self.render_hostapd(render_cfg), msgs)
             self._run(["systemctl", "restart", "hostapd"], msgs)
-            applied.append("Wi-Fi (hostapd)")
+            applied.append(_act("apply.hostapd"))
             reconnect = True
 
         # 2. wlan0 IP
         if ip_changed:
             self._set_wlan_ip(net["ap_ip"], prefix, msgs)
-            applied.append(f"Access point IP -> {net['ap_ip']}")
+            applied.append(_act("apply.apIp", net["ap_ip"]))
             reconnect = True
 
         # 3. DHCP / dnsmasq
@@ -534,15 +559,15 @@ class ConfigManager:
             if cfg["dhcp"]["enabled"]:
                 self._write_conf(self.dnsmasq_conf, self.render_dnsmasq(cfg), msgs)
                 self._run(["systemctl", "restart", "dnsmasq"], msgs)
-                applied.append("DHCP on")
+                applied.append(_act("apply.dhcpOn"))
             else:
                 self._run(["systemctl", "stop", "dnsmasq"], msgs)
-                applied.append("DHCP off")
+                applied.append(_act("apply.dhcpOff"))
 
         # 4. hostname
         if host_changed and cfg.get("hostname"):
             self.set_hostname(cfg["hostname"], msgs)
-            applied.append(f"Hostname → {cfg['hostname']}")
+            applied.append(_act("apply.hostname", cfg["hostname"]))
             reboot = True
 
         return {

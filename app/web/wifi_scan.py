@@ -161,7 +161,7 @@ def pick_best_channel(
     always carries an "error"/"aps_seen" so the caller can log what happened.
     """
     if shutil.which("iw") is None or shutil.which("ip") is None:
-        return None, {"error": "iw/ip not available"}
+        return None, {"error": "err.no_iw"}
     # ensure the radio is in station/managed mode — scanning fails in AP mode
     subprocess.run(["ip", "link", "set", iface, "down"], capture_output=True, text=True)
     subprocess.run(["iw", "dev", iface, "set", "type", "managed"], capture_output=True, text=True)

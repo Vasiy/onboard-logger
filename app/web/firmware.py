@@ -160,9 +160,9 @@ class FirmwareManager:
                ui_verbose: bool = False) -> None:
         with self._lock:
             if self.op != "idle":
-                raise RuntimeError("busy")
+                raise RuntimeError("err.fw_busy")
             if not self.available():
-                raise RuntimeError("5am_util is not installed")
+                raise RuntimeError("err.no_util")
             self.op = self.last_op = op
             self.result = ""
             self.progress = ""

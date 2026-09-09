@@ -156,5 +156,46 @@ def _main():
     print(f"\n{len(fns)} passed")
 
 
+
+# -- route order ------------------------------------------------------------
+def test_preview_reaches_its_own_route_and_not_the_catch_all():
+    """`/api/logs/{name:path}` is greedy, and it used to be declared first.
+
+    A preview of a ride log asks for `<day>/<file>.csv/data`, and the catch-all
+    matched the whole thing as the file name — three segments, which _safe_rel()
+    refuses by design — so every preview answered "bad file name" and the /data
+    route never saw a request. The order is the fix; this is what pins it.
+    """
+    paths = [r.path for r in main.app.routes if getattr(r, "path", "").startswith("/api/logs/{")]
+    assert paths.index("/api/logs/{name:path}/data") < paths.index("/api/logs/{name:path}"), paths
+
+
+def test_preview_returns_the_csv_text():
+    with tempfile.TemporaryDirectory() as tmp:
+        _root(tmp)
+        name = DAY + "/kline-dec-20260831-193200.csv"
+        res = asyncio.run(main.log_data(name))
+        assert res["text"].startswith("time,rpm"), res
+        assert res["name"] == name
+    _clear()
+
+
+def test_preview_refuses_a_log_that_is_not_a_decoded_csv():
+    with tempfile.TemporaryDirectory() as tmp:
+        _root(tmp)
+        res = asyncio.run(main.log_data(DAY + "/diag-20260831-193200.log"))
+        assert res.status_code == 400
+        assert b"err.not_decoded" in res.body, res.body
+    _clear()
+
+
+def test_preview_still_refuses_a_way_out():
+    with tempfile.TemporaryDirectory() as tmp:
+        _root(tmp)
+        res = asyncio.run(main.log_data("../../etc/passwd"))
+        assert res.status_code == 400
+        assert b"err.bad_name" in res.body, res.body
+    _clear()
+
 if __name__ == "__main__":
     _main()

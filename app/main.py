@@ -71,9 +71,9 @@ def _safe_rel(name: str) -> str:
     """
     parts = [q for q in str(name).replace("\\", "/").split("/") if q]
     if not parts or len(parts) > 2 or any(q in (".", "..") for q in parts):
-        raise ValueError("bad file name")
+        raise ValueError("err.bad_name")
     if len(parts) == 2 and parse_day(parts[0]) is None:
-        raise ValueError("bad file name")
+        raise ValueError("err.bad_name")
     return "/".join(parts[:-1] + [safe_name(parts[-1])])
 
 
@@ -590,7 +590,7 @@ async def addon_root(name: str):
 async def addon_file(name: str, path: str = ""):
     p = adm.web_file(name, path)
     if p is None:
-        return JSONResponse(status_code=404, content={"error": "not found"})
+        return JSONResponse(status_code=404, content={"error": "err.not_found"})
     return FileResponse(p, media_type=adm.content_type(p), headers={
         "Cache-Control": "no-cache",
         # the page is the add-on's, the origin is ours: never let a browser
@@ -610,7 +610,7 @@ async def addon_data_list(name: str):
 async def addon_data_read(name: str, file: str):
     blob = adm.read_data(name, file)
     if blob is None:
-        return JSONResponse(status_code=404, content={"error": "not found"})
+        return JSONResponse(status_code=404, content={"error": "err.not_found"})
     # stored bytes are opaque to the board; handing them back as anything a
     # browser might run is how a file store becomes an XSS hole
     return Response(content=blob, media_type="application/octet-stream",
@@ -821,7 +821,7 @@ def testing_cmd(cmd: str):
     """Run a one-shot diagnostic command (DTC read/clear, adaptation resets).
     Requires a live ECU link and no scan in progress."""
     if cmd not in ("read_dtc", "clear_dtc", "reset_tps", "reset_adaptation"):
-        return {"ok": False, "error": "unknown"}
+        return {"ok": False, "error": "err.unknown_command"}
     err = _testing_guard()
     if err:
         return err
@@ -863,7 +863,7 @@ def testing_actuator(localid: int):
     is released even if the browser goes away). Guarded like other tests."""
     act = next((a for a in _actuators() if a.get("localid") == localid), None)
     if act is None:
-        return {"ok": False, "error": "unknown"}
+        return {"ok": False, "error": "err.unknown_actuator"}
     err = _testing_guard()
     if err:
         return err
@@ -993,7 +993,7 @@ async def firmware_status():
 @app.post("/api/firmware/read")
 async def firmware_read(payload: dict):
     if fwm is None:
-        return JSONResponse(status_code=503, content={"error": "not ready"})
+        return JSONResponse(status_code=503, content={"error": "err.not_ready"})
     name = payload.get("name") or f"dump-{datetime.now():%Y%m%d-%H%M%S}.bin"
     try:
         name = safe_name(name if name.endswith(".bin") else name + ".bin")
@@ -1006,27 +1006,27 @@ async def firmware_read(payload: dict):
 @app.post("/api/firmware/write")
 async def firmware_write(payload: dict):
     if fwm is None:
-        return JSONResponse(status_code=503, content={"error": "not ready"})
+        return JSONResponse(status_code=503, content={"error": "err.not_ready"})
     try:
         name = safe_name(payload.get("name", ""))
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
     path = fwm.fw_dir / name
     if not path.is_file():
-        return JSONResponse(status_code=404, content={"error": "not found"})
+        return JSONResponse(status_code=404, content={"error": "err.not_found"})
     # hard safety gate: refuse to flash anything but an exact-size image
     req = _required_fw_size()
     if path.stat().st_size != req:
-        return JSONResponse(status_code=400, content={"error": "size_mismatch"})
+        return JSONResponse(status_code=400, content={"error": "fw.sizeMismatch"})
     verdict = _guard_verdict(name)
     if verdict["level"] == "block":
         return JSONResponse(status_code=400,
-                            content={"error": "fw_" + verdict["reason"], "guard": verdict})
+                            content={"error": "fw.guard." + verdict["reason"], "guard": verdict})
     try:
         fwm.start_write(name, verbose=bool(payload.get("verbose")))
     except FirmwareBlocked as e:
         return JSONResponse(status_code=400,
-                            content={"error": "fw_" + e.verdict["reason"], "guard": e.verdict})
+                            content={"error": "fw.guard." + e.verdict["reason"], "guard": e.verdict})
     except (ValueError, RuntimeError, FileNotFoundError) as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
     return {"ok": True, "name": name, "guard": verdict}
@@ -1036,32 +1036,32 @@ async def firmware_write(payload: dict):
 async def firmware_check(name: str):
     """Guard verdict without starting anything — lets the UI warn before the POST."""
     if fwm is None:
-        return JSONResponse(status_code=503, content={"error": "not ready"})
+        return JSONResponse(status_code=503, content={"error": "err.not_ready"})
     try:
         name = safe_name(name)
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
     if not (fwm.fw_dir / name).is_file():
-        return JSONResponse(status_code=404, content={"error": "not found"})
+        return JSONResponse(status_code=404, content={"error": "err.not_found"})
     return _guard_verdict(name)
 
 
 @app.post("/api/firmware/rename")
 async def firmware_rename(payload: dict):
     if fwm is None:
-        return JSONResponse(status_code=503, content={"error": "not ready"})
+        return JSONResponse(status_code=503, content={"error": "err.not_ready"})
     if fwm.status().get("op", "idle") != "idle":
-        return JSONResponse(status_code=400, content={"error": "fw_busy"})
+        return JSONResponse(status_code=400, content={"error": "err.fw_busy"})
     try:
         src = safe_name(payload.get("from", ""))
         dst = safe_name(payload.get("to", ""))
     except ValueError:
-        return JSONResponse(status_code=400, content={"error": "fw_bad_name"})
+        return JSONResponse(status_code=400, content={"error": "err.fw_bad_name"})
     if not dst.endswith(".bin"):
         dst += ".bin"
     sp = fwm.fw_dir / src
     if not sp.is_file():
-        return JSONResponse(status_code=404, content={"error": "not found"})
+        return JSONResponse(status_code=404, content={"error": "err.not_found"})
     dst = _unique_name(fwm.fw_dir, dst)     # never clobber another firmware
     try:
         sp.rename(fwm.fw_dir / dst)
@@ -1109,7 +1109,7 @@ async def firmware_cancel():
 @app.post("/api/firmware/upload")
 async def firmware_upload(file: UploadFile = File(...)):
     if fwm is None:
-        return JSONResponse(status_code=503, content={"error": "not ready"})
+        return JSONResponse(status_code=503, content={"error": "err.not_ready"})
     try:
         name = safe_name(file.filename or "")
     except ValueError as e:
@@ -1121,14 +1121,14 @@ async def firmware_upload(file: UploadFile = File(...)):
         try:
             zf = zipfile.ZipFile(io.BytesIO(data))
         except zipfile.BadZipFile:
-            return JSONResponse(status_code=400, content={"error": "bad_zip"})
+            return JSONResponse(status_code=400, content={"error": "fw.badZip"})
         # ignore dot-files (macOS AppleDouble "._x.bin", __MACOSX/, .DS_Store)
         members = [m for m in zf.namelist()
                    if not m.endswith("/") and not Path(m).name.startswith(".")]
         bins = [m for m in members
                 if Path(m).name.endswith(".bin") and not Path(m).name.endswith(".bin.txt")]
         if not bins:  # nothing to import -> archive discarded (never persisted)
-            return JSONResponse(status_code=400, content={"error": "no_firmware_in_zip"})
+            return JSONResponse(status_code=400, content={"error": "fw.noFilesInZip"})
         txt_by_base = {Path(m).name: m for m in members if Path(m).name.endswith(".bin.txt")}
         extracted = []
         for m in bins:  # extract ONLY .bin (+ matching .bin.txt) for safety
@@ -1152,13 +1152,13 @@ async def firmware_upload(file: UploadFile = File(...)):
 @app.post("/api/firmware/desc/{name}")
 async def firmware_desc_save(name: str, payload: dict):
     if fwm is None:
-        return JSONResponse(status_code=503, content={"error": "not ready"})
+        return JSONResponse(status_code=503, content={"error": "err.not_ready"})
     try:
         name = safe_name(name)
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
     if not (fwm.fw_dir / name).is_file():
-        return JSONResponse(status_code=404, content={"error": "not found"})
+        return JSONResponse(status_code=404, content={"error": "err.not_found"})
     text = str(payload.get("text", ""))
     p = fwm.fw_dir / (name + ".txt")
     if text.strip() == "":            # empty -> drop the description file
@@ -1172,21 +1172,21 @@ async def firmware_desc_save(name: str, payload: dict):
 @app.get("/api/firmware/diff")
 async def firmware_diff(a: str, b: str):
     if fwm is None:
-        return JSONResponse(status_code=503, content={"error": "not ready"})
+        return JSONResponse(status_code=503, content={"error": "err.not_ready"})
     try:
         a, b = safe_name(a), safe_name(b)
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
     pa, pb = fwm.fw_dir / a, fwm.fw_dir / b
     if not pa.is_file() or not pb.is_file():
-        return JSONResponse(status_code=404, content={"error": "not found"})
+        return JSONResponse(status_code=404, content={"error": "err.not_found"})
     return {"a": a, "b": b, **_diff_files(pa, pb)}
 
 
 @app.get("/api/firmware/desc/{name}")
 async def firmware_desc(name: str):
     if fwm is None:
-        return JSONResponse(status_code=503, content={"error": "not ready"})
+        return JSONResponse(status_code=503, content={"error": "err.not_ready"})
     try:
         name = safe_name(name)
     except ValueError as e:
@@ -1210,41 +1210,41 @@ def firmware_download_many(names: str = "", zipname: str = "firmware.zip"):
     Declared before /api/firmware/files/{name}, which would otherwise match it.
     """
     if fwm is None:
-        return JSONResponse(status_code=503, content={"error": "not ready"})
+        return JSONResponse(status_code=503, content={"error": "err.not_ready"})
     wanted = split_names(names)
     if not wanted:
-        return JSONResponse(status_code=400, content={"error": "nothing to download"})
+        return JSONResponse(status_code=400, content={"error": "err.nothing_to_download"})
     if len(wanted) == 1:
         p = resolve_in(fwm.fw_dir, wanted[0])
         if p is None:
-            return JSONResponse(status_code=404, content={"error": "not found"})
+            return JSONResponse(status_code=404, content={"error": "err.not_found"})
         return FileResponse(p, filename=p.name, media_type="application/octet-stream")
     entries = flat_entries(fwm.fw_dir, wanted, sidecars=(".txt",))
     if not entries:
-        return JSONResponse(status_code=404, content={"error": "not found"})
+        return JSONResponse(status_code=404, content={"error": "err.not_found"})
     return _zip_response(zip_entries(entries), _zipname(zipname, "firmware.zip"))
 
 
 @app.get("/api/firmware/files/{name}")
 async def firmware_download(name: str):
     if fwm is None:
-        return JSONResponse(status_code=503, content={"error": "not ready"})
+        return JSONResponse(status_code=503, content={"error": "err.not_ready"})
     try:
         name = safe_name(name)
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
     path = fwm.fw_dir / name
     if not path.is_file():
-        return JSONResponse(status_code=404, content={"error": "not found"})
+        return JSONResponse(status_code=404, content={"error": "err.not_found"})
     return FileResponse(path, filename=name, media_type="application/octet-stream")
 
 
 @app.delete("/api/firmware/files/{name}")
 async def firmware_file_delete(name: str):
     if fwm is None:
-        return JSONResponse(status_code=503, content={"error": "not ready"})
+        return JSONResponse(status_code=503, content={"error": "err.not_ready"})
     if fwm.status()["op"] != "idle":
-        return JSONResponse(status_code=409, content={"error": "operation in progress"})
+        return JSONResponse(status_code=409, content={"error": "err.op_running"})
     try:
         name = safe_name(name)
     except ValueError as e:
@@ -1265,7 +1265,8 @@ async def post_config(payload: dict):
     try:
         cm.validate(cfg)
     except ValueError as exc:
-        return JSONResponse(status_code=400, content={"error": str(exc)})
+        return JSONResponse(status_code=400, content={
+            "error": str(exc), "detail": getattr(exc, "detail", "")})
     cm.save(cfg)
     if diag is not None:
         diag.apply(cfg.get("diag"))
@@ -1586,7 +1587,7 @@ async def update_status():
 @app.post("/api/update/upload")
 async def update_upload(file: UploadFile = File(...)):
     if upd is None:
-        return JSONResponse(status_code=503, content={"error": "\u043d\u0435 \u0433\u043e\u0442\u043e\u0432\u043e"})
+        return JSONResponse(status_code=503, content={"error": "err.not_ready"})
     try:
         name = safe_name(file.filename or "")
     except ValueError as e:
@@ -1671,7 +1672,7 @@ def logs_download_get(names: str = "", zipname: str = "k-line.log.zip"):
     """
     entries = _log_entries(split_names(names))
     if not entries:
-        return JSONResponse(status_code=404, content={"error": "not found"})
+        return JSONResponse(status_code=404, content={"error": "err.not_found"})
     return _zip_response(zip_entries(entries), _zipname(zipname, "k-line.log.zip"))
 
 
@@ -1687,15 +1688,46 @@ def logs_download(payload: dict):
                          _zipname(payload.get("zipname"), "k-line.log.zip"))
 
 
+# Declared before the {name:path} route below: that one is greedy and would
+# match this whole URL with "/data" as part of the file name, which is three
+# segments and refused. The download routes sit above it for the same reason.
+@app.get("/api/logs/{name:path}/data")
+async def log_data(name: str):
+    """Decoded CSV text for charting (unzips a .csv.zip). Rejects raw logs."""
+    try:
+        name = _safe_rel(name)
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+    path = _log_file(name)
+    if path is None:
+        return JSONResponse(status_code=404, content={"error": "err.not_found"})
+    if _log_kind(Path(name).name) != "decoded":
+        return JSONResponse(status_code=400, content={"error": "err.not_decoded"})
+    try:
+        if name.endswith(".zip"):
+            with zipfile.ZipFile(path) as z:
+                inner = [n for n in z.namelist() if n.endswith(".csv")]
+                if not inner:
+                    return JSONResponse(status_code=400, content={"error": "err.not_decoded"})
+                data = z.read(inner[0])
+        else:
+            data = path.read_bytes()
+    except (OSError, zipfile.BadZipFile):
+        return JSONResponse(status_code=400, content={"error": "err.read_error"})
+    if len(data) > 40 * 1024 * 1024:
+        return JSONResponse(status_code=400, content={"error": "logs.tooLarge"})
+    return {"name": name, "text": data.decode("utf-8", "replace")}
+
 @app.get("/api/logs/{name:path}")
 async def get_log(name: str):
     try:
         name = _safe_rel(name)
     except ValueError as exc:
-        return JSONResponse(status_code=400, content={"error": str(exc)})
+        return JSONResponse(status_code=400, content={
+            "error": str(exc), "detail": getattr(exc, "detail", "")})
     path = _log_file(name)
     if path is None:
-        return JSONResponse(status_code=404, content={"error": "not found"})
+        return JSONResponse(status_code=404, content={"error": "err.not_found"})
     if name.endswith(".zip"):
         media = "application/zip"
     elif name.endswith(".csv"):
@@ -1713,7 +1745,7 @@ async def delete_log(name: str):
         return JSONResponse(status_code=400, content={"error": str(e)})
     path = _log_file(name)
     if path is None:
-        return JSONResponse(status_code=404, content={"error": "not found"})
+        return JSONResponse(status_code=404, content={"error": "err.not_found"})
     path.unlink()
     # an emptied day folder is noise in the list; the root itself stays
     parent = path.parent
@@ -1724,33 +1756,6 @@ async def delete_log(name: str):
             pass
     return {"ok": True}
 
-
-@app.get("/api/logs/{name:path}/data")
-async def log_data(name: str):
-    """Decoded CSV text for charting (unzips a .csv.zip). Rejects raw logs."""
-    try:
-        name = _safe_rel(name)
-    except ValueError as e:
-        return JSONResponse(status_code=400, content={"error": str(e)})
-    path = _log_file(name)
-    if path is None:
-        return JSONResponse(status_code=404, content={"error": "not found"})
-    if _log_kind(Path(name).name) != "decoded":
-        return JSONResponse(status_code=400, content={"error": "not_decoded"})
-    try:
-        if name.endswith(".zip"):
-            with zipfile.ZipFile(path) as z:
-                inner = [n for n in z.namelist() if n.endswith(".csv")]
-                if not inner:
-                    return JSONResponse(status_code=400, content={"error": "not_decoded"})
-                data = z.read(inner[0])
-        else:
-            data = path.read_bytes()
-    except (OSError, zipfile.BadZipFile):
-        return JSONResponse(status_code=400, content={"error": "read_error"})
-    if len(data) > 40 * 1024 * 1024:
-        return JSONResponse(status_code=400, content={"error": "too_large"})
-    return {"name": name, "text": data.decode("utf-8", "replace")}
 
 
 if __name__ == "__main__":
