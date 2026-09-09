@@ -750,7 +750,7 @@ class KLineWorker(threading.Thread):
         """
         if kind != "gear":
             return None
-        return self._gear.update(values.get("rpm"), values.get("r53"),
+        return self._gear.update(values.get("rpm"), values.get("speed"),
                                  values.get("neutral"), values.get("clutch"))
 
     def _poll_loop(self, session: KWP2000Session) -> None:

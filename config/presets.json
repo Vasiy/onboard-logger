@@ -11,8 +11,8 @@
     "r74",
     "r75",
     "r77",
-    "r79",
-    "r7a"
+    "kill_stop",
+    "kill_run"
    ],
    "note": "# Switch block 0x74-0x7A\n\nStationary, **engine stopped, ignition on**. No ride needed, five minutes.\n\n`0x76` the side stand and `0x78` the clutch are already settled and sit in the same run of slots -- they are the references: they show that what is next to them really is a set of digital inputs.\n\n## How to capture\n\n1. Record, 10 s of quiet -- that is the zero point.\n2. Work **one** control at a time, hold it 5 s, put it back.\n3. Five seconds of quiet between controls: the pauses are what tells them apart afterwards.\n\nWhat to go through: kill switch, brake light by hand and by foot separately, starter with the kill switch off (it cranks, it does not start), high beam, hazards, indicators, neutral to gear with the clutch pulled, side stand up and down.\n\n## What it settles\n\n`r74` `r75` `r77` `r79` `r7a` -- which byte followed which control. `vbat` is in the set to tell a real input from a sag under load."
   },
@@ -26,9 +26,9 @@
     "engine_state",
     "idle_step_base",
     "idle_step_adj",
-    "r6c",
+    "idle_step_pos",
     "r3e",
-    "r57",
+    "run_state",
     "r5c",
     "r62",
     "co_trim"
@@ -43,7 +43,7 @@
     "coolant_t",
     "vbat",
     "engine_state",
-    "r53",
+    "speed",
     "r5d",
     "r5e",
     "r5f",

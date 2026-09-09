@@ -27,6 +27,21 @@
       "type": "enum", "base": 16,
       "values": {"00": "Neutral", "01": "Engaged"}
     },
+    "runstate": {
+      "_note": "0x57 across 2026-09-09. 4 stands while the engine runs (732 of the 733 samples above 500 rpm) and the kill button takes it to 8, which the rider watched happen. 16 is the third value and the one still short of proof: it stood for two samples at the instant of one stop and arrived 18 s after another, which reads as the sleep the ECU announces to the bus once the ignition is gone. Labelled as a guess until a stop recorded with the ignition left on for a minute says otherwise.",
+      "type": "enum", "base": 16,
+      "values": {"04": "Engine running", "08": "Engine stopped", "10": "Going to sleep (guess)"}
+    },
+    "kill_run": {
+      "_note": "0x7A and 0x79 are one input reported twice: strictly inverse across all 261 samples where both were read on 2026-09-09, with no (0,0) or (1,1) pair anywhere. 0x7A stood at 1 in every one of the 98 samples with the engine running, and its last flip to 1 landed in the same sample the starter pulled the battery to 7.9 V -- RUN set, then the button pressed. The rider confirmed the kill switch is what was being worked.",
+      "type": "enum", "base": 16,
+      "values": {"00": "STOP", "01": "RUN"}
+    },
+    "kill_stop": {
+      "_note": "The other half of the same input, inverted -- see kill_run. Kept as its own channel because that is how the ECU answers it, and because the pair agreeing is the check that either is being read correctly.",
+      "type": "enum", "base": 16,
+      "values": {"00": "RUN", "01": "STOP"}
+    },
     "lambda_ctl": {
       "_note": "0x4B on 2026-09-08 (1130 same-state pairs), split by the sign of the 0x47 integrator step: 7 rises 266 times against 32 with the sensor at a median 175 mV (lean), 5 falls 200 against 35 at a median 727 mV (rich), and both carry 0x49 = 2 -- the two branches of the closed loop, 231 and 228 transitions between them. 4 is open loop with the integrator held (57 of 120 steps flat, 0x49 = 0), 3 is the same but transitional and rare, 1 is the controller frozen with the engine stopped (124 of 125 steps flat) and 2 only shows on a cold sensor (39-63 mV, integrator at 0). 0 and 6 were never seen, so they carry no label.",
       "type": "enum", "base": 16,
