@@ -1,57 +1,56 @@
 {
  "slots": [
   {
-   "name": "Switch",
+   "name": "Sleep",
    "keys": [
     "rpm",
     "vbat",
-    "side_stand",
-    "clutch",
-    "neutral",
-    "r74",
-    "r75",
-    "r77",
+    "engine_state",
+    "run_state",
+    "kill_run",
     "kill_stop",
-    "kill_run"
+    "r75",
+    "r74",
+    "r77"
    ],
-   "note": "# Switch block 0x74-0x7A\n\nStationary, **engine stopped, ignition on**. No ride needed, five minutes.\n\n`0x76` the side stand and `0x78` the clutch are already settled and sit in the same run of slots -- they are the references: they show that what is next to them really is a set of digital inputs.\n\n## How to capture\n\n1. Record, 10 s of quiet -- that is the zero point.\n2. Work **one** control at a time, hold it 5 s, put it back.\n3. Five seconds of quiet between controls: the pauses are what tells them apart afterwards.\n\nWhat to go through: kill switch, brake light by hand and by foot separately, starter with the kill switch off (it cranks, it does not start), high beam, hazards, indicators, neutral to gear with the clutch pulled, side stand up and down.\n\n## What it settles\n\n`r74` `r75` `r77` `r79` `r7a` -- which byte followed which control. `vbat` is in the set to tell a real input from a sag under load."
+   "note": "# The stop, and what happens after it\n\nEverything here turns on one thing nobody has recorded yet: **what the board sees after the ignition goes off**. Every stop so far was a kill button with the ignition left on, and the recording ended within a minute.\n\n## What is being settled\n\n- **`run_state` = 16.** 4 is the engine running and 8 is stopped, both watched. 16 stood for two samples at one stop and arrived 18 s after another, which reads as the sleep the ECU announces to the bus once the ignition is gone. If it appears at the ignition and not at the kill button, that is the answer.\n- **`r75`** went to 1 in the sample the starter engaged and stayed there for the whole run. Nobody has seen it come back down, because no recording outlived the engine by long enough.\n- **`r74`** and **`r77`** have held 1 through everything: ignition on, every switch, cranking, running, stopping. Ignition *off* is the one state left untried.\n\n## How to capture\n\n1. Record, 20 s with the ignition on and the engine off.\n2. Start it, let it idle a minute.\n3. Stop it with the **kill button**, and leave the ignition on. Wait a full two minutes without touching anything — the 18 s mark is inside that.\n4. Now turn the **ignition off**, and keep recording until the link drops on its own.\n\nThe link dying is the end of the file and that is fine — the last samples before it are the ones worth having."
   },
   {
-   "name": "Idle+6C",
+   "name": "Cruise",
    "keys": [
     "rpm",
-    "coolant_t",
     "throttle",
-    "idle_target",
+    "coolant_t",
     "engine_state",
-    "idle_step_base",
-    "idle_step_adj",
-    "idle_step_pos",
-    "r3e",
-    "run_state",
+    "r6a",
     "r5c",
     "r62",
-    "co_trim"
+    "co_trim",
+    "lambda_f",
+    "lambda_int_f",
+    "lambda_reg_f",
+    "lambda_ctl_f"
    ],
-   "note": "# Idle stepper and the constant bytes\n\nA cold start and a warm-up to the fan, the bike standing still.\n\n## What is being checked\n\n- **Is `r6c` the sum?** In the 03-09 scan it read 164 with a base of 118 and a trim of 46 -- an exact addition, but from *one* sample. Here all three channels run side by side: if the equality holds through the whole warm-up, the channel is named.\n- `r3e` (52), `r57` (4), `r62` (4), `r5c` (1) stood constant in that single scan. A warm-up from cold shows whether they are constants or merely slow.\n- `co_trim` -- zero across ~6300 samples, but its slot is its **own**, so that is a value rather than a stub. One flicker and the open-loop-variant hypothesis is gone.\n\n## How to capture\n\n1. Engine cold. Record, 30 s before the start.\n2. Start it, sit at idle until the fan comes on.\n3. Blip it to 3000 a couple of times and let it drop.\n4. Stop it **while recording** and give it another 20 s."
+   "note": "# Steady throttle, with the lambda beside it\n\n`r6a` is the odd one: zero on a closed throttle *and* zero flat out, but 5…21 on a moderate steady throttle. Whatever it is lives in the cruise region, which is where the closed loop lives too — so it gets the lambda channels as company, because the answer is probably in their company.\n\n## What is being settled\n\n- **`r6a`** — does it track the integrator, the loop flag, or the phase? A long steady cruise at one throttle position is what separates those.\n- **`r5c`** — 91.5 % agreement with the closed-throttle bit of `engine_state`, one sample ahead of it. The remaining 8.5 % is either read skew or a different threshold, and a slow sweep of the throttle says which.\n- **`r62`** — 0 stopped, 4 at idle, 2 off idle, flickering between 4 and 2 around 1300–1700 rpm. Holding exactly there for a while shows whether the flicker is hysteresis or something else.\n- **`co_trim`** — zero on ~6300 samples, and its slot is its own, so the zero is a value. One flicker anywhere kills the open-loop-variant hypothesis.\n\n## How to capture\n\n1. Warm it up fully first — the closed loop has to be in.\n2. Hold a steady small throttle, 3000–4000 rpm, for a full minute without moving your wrist. That is the part that matters and the part that is easy to skip.\n3. Then a slow sweep: closed to about a fifth of throttle over ten seconds, and back, twice.\n4. Sit at idle two minutes and let the 1300–1700 band flicker on its own."
   },
   {
-   "name": "Unk-w",
+   "name": "NewByte",
    "keys": [
     "rpm",
     "throttle",
     "coolant_t",
     "vbat",
     "engine_state",
-    "speed",
+    "r6e",
+    "r70",
+    "r3e",
     "r5d",
     "r5e",
     "r5f",
-    "r63",
-    "r6a"
+    "r63"
    ],
-   "note": "# Six word-sized identifiers with no name\n\n`r53` `r5d` `r5e` `r5f` `r63` `r6a` -- each has a slot of its own in the firmware, so the variable is real. But all six read zero in the single scan there is: something has to move them.\n\n## How to capture\n\nAn ordinary ride, but with the extremes:\n\n- long closed-throttle runs down from 4000+ -- engine braking;\n- full throttle to the limiter at least once;\n- a warm-up to the fan and a stand in traffic;\n- a hot restart after ten minutes stopped.\n\n## What to watch for\n\nAny of the six leaving zero for even one sample is the condition, found. Write down what it was, and repeat it to tell a channel from a glitch."
+   "note": "# The two that have never been recorded\n\n`r6e` and `r70` answer, have a slot of their own in the firmware, and have **never been in a preset** — every set so far missed them. There is no data on them at all, which makes them the cheapest thing left to learn something about.\n\nThe four word-sized ones ride along for a second chance: `r5d` `r5e` `r5f` `r63` held a flat zero through the rev limiter, full throttle, long overruns and a warm-up to 97 °C, so if they move at all it is under something that ride did not do. `r3e` has read a constant 52 through everything including a full cold start.\n\n## How to capture\n\nAn ordinary ride, but reach for the states the last one skipped:\n\n- stop in traffic long enough for the fan to cycle twice;\n- a hot restart after ten minutes standing;\n- ride with the side stand down and the clutch pulled at a standstill;\n- a gear change at low rpm, and one at the limiter;\n- if anything ever throws a fault light, that whole ride is worth keeping.\n\n## What counts as a result\n\nAny of the six leaving its usual value for even one sample. Write down what was happening and repeat it — one sample is a hint, twice is a channel."
   }
  ],
- "free_note": ""
+ "free_note": "The rear bank — `lambda_r`, `lambda_int_r`, `lambda_reg_r`, `lambda_ctl_r` — is not in any of these on purpose. The firmware answers all four from a shared placeholder slot, and no sensor is fitted on this side, so nothing this motorcycle can do will move them. They stay named and listed because other Granpasso builds wire a second probe; proving them needs that bike, not another ride on this one."
 }
