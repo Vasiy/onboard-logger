@@ -52,6 +52,16 @@
       "type": "enum", "base": 16,
       "values": {"00": "Open loop", "02": "Closed loop"}
     },
+    "idle_mode": {
+      "_note": "0x62 across the 2026-09-10 ride (693 samples): 0 only with the engine stopped, 4 only with the engine running and the throttle at its 1.6-2.0 deg stop (1168-2234 rpm), 2 everywhere else (1223-5053 rpm, throttle out to 25 deg). The three do not overlap, which is what the guessed label already said.",
+      "type": "enum", "base": 16,
+      "values": {"00": "Engine stopped", "02": "Off idle", "04": "Idle"}
+    },
+    "warmup_on": {
+      "_note": "0x5C is the on/off half of the correction 0x6A carries: (0x5C == 4) == (0x6A > 0) in 680 of 693 samples on 2026-09-10, and all 13 exceptions are single samples on a transition, where the two rli are answered one request apart. It had been labelled a closed-throttle switch, which the same ride refuted -- the throttle rule it was supposed to follow agrees on 92 % of samples at best, at any threshold and any lag.",
+      "type": "enum", "base": 16,
+      "values": {"01": "Off", "04": "On"}
+    },
     "onoff": {
       "type": "enum", "base": 16,
       "values": {"00": "OFF", "01": "ON"}

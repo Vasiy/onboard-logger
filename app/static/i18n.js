@@ -291,7 +291,7 @@ window.I18N = {
     "param.lambda_reg_f": "Lambda loop F", "param.lambda_reg_r": "Lambda loop R",
     "param.lambda_ctl_f": "Lambda state F", "param.lambda_ctl_r": "Lambda state R",
     "param.dwell_f": "Dwell F", "param.dwell_r": "Dwell R", "param.air_press": "Air pressure",
-    "param.neutral": "Neutral", "param.engine_state": "Status engine", "param.advance2": "Advance (live)", "param.idle_step_base": "Idle stepper base", "param.idle_step_pos": "Idle stepper position", "param.speed": "Road speed", "param.run_state": "Run state", "param.kill_run": "Kill switch (RUN)", "param.kill_stop": "Kill switch (STOP)", "param.gear": "Gear",
+    "param.neutral": "Neutral", "param.engine_state": "Status engine", "param.advance2": "Advance (live)", "param.idle_step_base": "Idle stepper base", "param.idle_step_pos": "Idle stepper position", "param.speed": "Road speed", "param.run_state": "Run state", "param.kill_run": "Kill switch (RUN)", "param.kill_stop": "Kill switch (STOP)", "param.engine_run": "Engine running", "param.idle_mode": "Idle mode", "param.warmup_enrich": "Warm-up enrichment", "param.warmup_on": "Warm-up enrichment state", "param.gear": "Gear",
     "param.idle_step_adj": "Idle stepper adj.opening", "param.prog_counter": "Prog counter",
     "param.side_stand": "Side stand", "param.clutch": "Clutch"
   },
@@ -583,7 +583,7 @@ window.I18N = {
     "param.lambda_reg_f": "Lambda-Regelkreis F", "param.lambda_reg_r": "Lambda-Regelkreis R",
     "param.lambda_ctl_f": "Lambda-Zustand F", "param.lambda_ctl_r": "Lambda-Zustand R",
     "param.dwell_f": "Schließzeit F", "param.dwell_r": "Schließzeit R", "param.air_press": "Luftdruck",
-    "param.neutral": "Leerlauf", "param.engine_state": "Motorstatus", "param.advance2": "Zündwinkel (live)", "param.idle_step_base": "Leerlaufsteller Basis", "param.idle_step_pos": "Leerlaufsteller Stellung", "param.speed": "Geschwindigkeit", "param.run_state": "Laufzustand", "param.kill_run": "Not-Aus (RUN)", "param.kill_stop": "Not-Aus (STOP)", "param.gear": "Gang",
+    "param.neutral": "Leerlauf", "param.engine_state": "Motorstatus", "param.advance2": "Zündwinkel (live)", "param.idle_step_base": "Leerlaufsteller Basis", "param.idle_step_pos": "Leerlaufsteller Stellung", "param.speed": "Geschwindigkeit", "param.run_state": "Laufzustand", "param.kill_run": "Not-Aus (RUN)", "param.kill_stop": "Not-Aus (STOP)", "param.engine_run": "Motor läuft", "param.idle_mode": "Leerlaufmodus", "param.warmup_enrich": "Warmlauf-Anreicherung", "param.warmup_on": "Warmlauf-Anreicherung Status", "param.gear": "Gang",
     "param.idle_step_adj": "Leerlaufsteller Korrektur", "param.prog_counter": "Prog-Zähler",
     "param.side_stand": "Seitenständer", "param.clutch": "Kupplung"
   },
@@ -876,7 +876,7 @@ window.I18N = {
     "param.lambda_reg_r": "Bucle lambda R", "param.lambda_ctl_f": "Estado lambda F",
     "param.lambda_ctl_r": "Estado lambda R", "param.dwell_f": "Dwell F",
     "param.dwell_r": "Dwell R", "param.air_press": "Presión de aire",
-    "param.neutral": "Punto muerto", "param.engine_state": "Estado del motor", "param.advance2": "Avance (en vivo)", "param.idle_step_base": "Paso a paso ralentí (base)", "param.idle_step_pos": "Posición paso a paso ralentí", "param.speed": "Velocidad", "param.run_state": "Estado de marcha", "param.kill_run": "Interruptor de paro (RUN)", "param.kill_stop": "Interruptor de paro (STOP)", "param.gear": "Marcha",
+    "param.neutral": "Punto muerto", "param.engine_state": "Estado del motor", "param.advance2": "Avance (en vivo)", "param.idle_step_base": "Paso a paso ralentí (base)", "param.idle_step_pos": "Posición paso a paso ralentí", "param.speed": "Velocidad", "param.run_state": "Estado de marcha", "param.kill_run": "Interruptor de paro (RUN)", "param.kill_stop": "Interruptor de paro (STOP)", "param.engine_run": "Motor en marcha", "param.idle_mode": "Modo ralentí", "param.warmup_enrich": "Enriquecimiento en calentamiento", "param.warmup_on": "Estado del enriquecimiento", "param.gear": "Marcha",
     "param.idle_step_adj": "Ajuste apertura ralentí", "param.prog_counter": "Contador prog.",
     "param.side_stand": "Caballete lateral", "param.clutch": "Embrague"
   },
@@ -1169,7 +1169,7 @@ window.I18N = {
     "param.lambda_ctl_f": "État lambda F", "param.lambda_ctl_r": "État lambda R",
     "param.dwell_f": "Dwell F", "param.dwell_r": "Dwell R",
     "param.air_press": "Pression d'air", "param.neutral": "Point mort", "param.engine_state": "État moteur", "param.advance2": "Avance (en direct)",
-    "param.idle_step_base": "Moteur pas-à-pas ralenti (base)", "param.idle_step_pos": "Position moteur pas-à-pas ralenti", "param.speed": "Vitesse", "param.run_state": "État de marche", "param.kill_run": "Coupe-circuit (RUN)", "param.kill_stop": "Coupe-circuit (STOP)", "param.gear": "Rapport",
+    "param.idle_step_base": "Moteur pas-à-pas ralenti (base)", "param.idle_step_pos": "Position moteur pas-à-pas ralenti", "param.speed": "Vitesse", "param.run_state": "État de marche", "param.kill_run": "Coupe-circuit (RUN)", "param.kill_stop": "Coupe-circuit (STOP)", "param.engine_run": "Moteur en marche", "param.idle_mode": "Mode ralenti", "param.warmup_enrich": "Enrichissement à froid", "param.warmup_on": "État de l’enrichissement", "param.gear": "Rapport",
     "param.idle_step_adj": "Correction ouverture ralenti", "param.prog_counter": "Compteur prog.",
     "param.side_stand": "Béquille latérale", "param.clutch": "Embrayage"
   },
@@ -1462,7 +1462,7 @@ window.I18N = {
     "param.lambda_ctl_f": "Stato lambda F", "param.lambda_ctl_r": "Stato lambda R",
     "param.dwell_f": "Dwell F", "param.dwell_r": "Dwell R",
     "param.air_press": "Pressione aria", "param.neutral": "Folle", "param.engine_state": "Stato motore", "param.advance2": "Anticipo (live)",
-    "param.idle_step_base": "Stepper minimo (base)", "param.idle_step_pos": "Posizione stepper minimo", "param.speed": "Velocità", "param.run_state": "Stato di marcia", "param.kill_run": "Interruttore di arresto (RUN)", "param.kill_stop": "Interruttore di arresto (STOP)", "param.gear": "Marcia", "param.idle_step_adj": "Correzione apertura minimo",
+    "param.idle_step_base": "Stepper minimo (base)", "param.idle_step_pos": "Posizione stepper minimo", "param.speed": "Velocità", "param.run_state": "Stato di marcia", "param.kill_run": "Interruttore di arresto (RUN)", "param.kill_stop": "Interruttore di arresto (STOP)", "param.engine_run": "Motore in moto", "param.idle_mode": "Modo minimo", "param.warmup_enrich": "Arricchimento a freddo", "param.warmup_on": "Stato arricchimento", "param.gear": "Marcia", "param.idle_step_adj": "Correzione apertura minimo",
     "param.prog_counter": "Contatore prog.", "param.side_stand": "Cavalletto laterale",
     "param.clutch": "Frizione"
   },
@@ -1754,7 +1754,7 @@ window.I18N = {
     "param.lambda_reg_f": "Lambdalus F", "param.lambda_reg_r": "Lambdalus R",
     "param.lambda_ctl_f": "Lambdastatus F", "param.lambda_ctl_r": "Lambdastatus R",
     "param.dwell_f": "Sluittijd F", "param.dwell_r": "Sluittijd R", "param.air_press": "Luchtdruk",
-    "param.neutral": "Vrijloop", "param.engine_state": "Motorstatus", "param.advance2": "Ontsteking (live)", "param.idle_step_base": "Stationairstepper basis", "param.idle_step_pos": "Stationairstepper stand", "param.speed": "Snelheid", "param.run_state": "Draaistatus", "param.kill_run": "Noodstop (RUN)", "param.kill_stop": "Noodstop (STOP)", "param.gear": "Versnelling",
+    "param.neutral": "Vrijloop", "param.engine_state": "Motorstatus", "param.advance2": "Ontsteking (live)", "param.idle_step_base": "Stationairstepper basis", "param.idle_step_pos": "Stationairstepper stand", "param.speed": "Snelheid", "param.run_state": "Draaistatus", "param.kill_run": "Noodstop (RUN)", "param.kill_stop": "Noodstop (STOP)", "param.engine_run": "Motor draait", "param.idle_mode": "Stationairmodus", "param.warmup_enrich": "Warmloopverrijking", "param.warmup_on": "Status warmloopverrijking", "param.gear": "Versnelling",
     "param.idle_step_adj": "Stationairstepper correctie", "param.prog_counter": "Prog-teller",
     "param.side_stand": "Zijstandaard", "param.clutch": "Koppeling"
   },
@@ -2047,7 +2047,7 @@ window.I18N = {
     "param.lambda_ctl_f": "Ламбда състояние F", "param.lambda_ctl_r": "Ламбда състояние R",
     "param.dwell_f": "Dwell F", "param.dwell_r": "Dwell R",
     "param.air_press": "Атмосферно налягане", "param.neutral": "Неутрална", "param.engine_state": "Състояние на двигателя", "param.advance2": "Аванс (текущ)",
-    "param.idle_step_base": "Стъпков ХХ (база)", "param.idle_step_pos": "Позиция стъпков ХХ", "param.speed": "Скорост", "param.run_state": "Състояние на работа", "param.kill_run": "Авариен ключ (RUN)", "param.kill_stop": "Авариен ключ (STOP)", "param.gear": "Предавка", "param.idle_step_adj": "Корекция отваряне ХХ",
+    "param.idle_step_base": "Стъпков ХХ (база)", "param.idle_step_pos": "Позиция стъпков ХХ", "param.speed": "Скорост", "param.run_state": "Състояние на работа", "param.kill_run": "Авариен ключ (RUN)", "param.kill_stop": "Авариен ключ (STOP)", "param.engine_run": "Двигателят работи", "param.idle_mode": "Режим на празен ход", "param.warmup_enrich": "Обогатяване при загряване", "param.warmup_on": "Състояние на обогатяването", "param.gear": "Предавка", "param.idle_step_adj": "Корекция отваряне ХХ",
     "param.prog_counter": "Прог. брояч", "param.side_stand": "Странична стойка", "param.clutch": "Съединител"
   },
   ru: {
@@ -2339,7 +2339,7 @@ window.I18N = {
     "param.lambda_ctl_f": "Фаза лямбда F", "param.lambda_ctl_r": "Фаза лямбда R",
     "param.dwell_f": "Накопление F", "param.dwell_r": "Накопление R",
     "param.air_press": "Давление воздуха", "param.neutral": "Нейтраль", "param.engine_state": "Состояние двигателя", "param.advance2": "Опережение (живое)",
-    "param.idle_step_base": "Шаговый ХХ (база)", "param.idle_step_pos": "Шаговый ХХ (позиция)", "param.speed": "Скорость", "param.run_state": "Состояние работы", "param.kill_run": "Killswitch (RUN)", "param.kill_stop": "Killswitch (STOP)", "param.gear": "Передача", "param.idle_step_adj": "Шаговый ХХ (коррекция)",
+    "param.idle_step_base": "Шаговый ХХ (база)", "param.idle_step_pos": "Шаговый ХХ (позиция)", "param.speed": "Скорость", "param.run_state": "Состояние работы", "param.kill_run": "Killswitch (RUN)", "param.kill_stop": "Killswitch (STOP)", "param.engine_run": "Двигатель работает", "param.idle_mode": "Режим холостого хода", "param.warmup_enrich": "Прогревочное обогащение", "param.warmup_on": "Состояние обогащения", "param.gear": "Передача", "param.idle_step_adj": "Шаговый ХХ (коррекция)",
     "param.prog_counter": "Счётчик прогр.", "param.side_stand": "Боковая подножка",
     "param.clutch": "Сцепление"
   }

@@ -7,13 +7,14 @@
     "vbat",
     "engine_state",
     "run_state",
-    "kill_run",
     "kill_stop",
-    "r75",
+    "kill_run",
+    "engine_run",
     "r74",
-    "r77"
+    "r77",
+    "r3e"
    ],
-   "note": "# The stop, and what happens after it\n\nEverything here turns on one thing nobody has recorded yet: **what the board sees after the ignition goes off**. Every stop so far was a kill button with the ignition left on, and the recording ended within a minute.\n\n## What is being settled\n\n- **`run_state` = 16.** 4 is the engine running and 8 is stopped, both watched. 16 stood for two samples at one stop and arrived 18 s after another, which reads as the sleep the ECU announces to the bus once the ignition is gone. If it appears at the ignition and not at the kill button, that is the answer.\n- **`r75`** went to 1 in the sample the starter engaged and stayed there for the whole run. Nobody has seen it come back down, because no recording outlived the engine by long enough.\n- **`r74`** and **`r77`** have held 1 through everything: ignition on, every switch, cranking, running, stopping. Ignition *off* is the one state left untried.\n\n## How to capture\n\n1. Record, 20 s with the ignition on and the engine off.\n2. Start it, let it idle a minute.\n3. Stop it with the **kill button**, and leave the ignition on. Wait a full two minutes without touching anything — the 18 s mark is inside that.\n4. Now turn the **ignition off**, and keep recording until the link drops on its own.\n\nThe link dying is the end of the file and that is fine — the last samples before it are the ones worth having."
+   "note": "# The stop, and what happens after it\n\nEverything here turns on one thing nobody has recorded yet: **what the board sees after the ignition goes off**. Every stop so far was a kill button with the ignition left on, and the recording ended within a minute.\n\n## What is being settled\n\n- **`run_state` = 16.** 4 is the engine running and 8 is stopped, both watched. 16 stood for two samples at one stop and arrived 18 s after another, which reads as the sleep the ECU announces to the bus once the ignition is gone. If it appears at the ignition and not at the kill button, that is the answer.\n- **`r74`** and **`r77`** have held 1 through everything: ignition on, every switch, cranking, running, stopping. Ignition *off* is the one state left untried — which is the whole reason they are still here rather than filed away as dead.\n- **`r3e`** is the same story with a constant 52.\n\n## Already answered, kept as the reference line\n\n**`engine_run`** (was `r75`) is the engine-running flag: on 2026-09-10 it equalled `engine_state != 0` in 296 of 297 samples, set in the sample the starter pulled the battery to 10.1 V with rpm still at 0, and cleared in the sample the engine stopped. It says the same thing as the bitfield in one byte, so it is the cheap sanity check that the rest of the row is being read at the right moment.\n\n## How to capture\n\n1. Record, 20 s with the ignition on and the engine off.\n2. Start it, let it idle a minute.\n3. Stop it with the **kill button**, and leave the ignition on. Wait a full two minutes without touching anything — the 18 s mark is inside that.\n4. Now turn the **ignition off**, and keep recording until the link drops on its own.\n\nThe link dying is the end of the file and that is fine — the last samples before it are the ones worth having."
   },
   {
    "name": "Cruise",
@@ -22,34 +23,34 @@
     "throttle",
     "coolant_t",
     "engine_state",
-    "r6a",
-    "r5c",
-    "r62",
+    "warmup_enrich",
+    "warmup_on",
+    "idle_mode",
     "co_trim",
     "lambda_f",
     "lambda_int_f",
     "lambda_reg_f",
     "lambda_ctl_f"
    ],
-   "note": "# Steady throttle, with the lambda beside it\n\n`r6a` is the odd one: zero on a closed throttle *and* zero flat out, but 5…21 on a moderate steady throttle. Whatever it is lives in the cruise region, which is where the closed loop lives too — so it gets the lambda channels as company, because the answer is probably in their company.\n\n## What is being settled\n\n- **`r6a`** — does it track the integrator, the loop flag, or the phase? A long steady cruise at one throttle position is what separates those.\n- **`r5c`** — 91.5 % agreement with the closed-throttle bit of `engine_state`, one sample ahead of it. The remaining 8.5 % is either read skew or a different threshold, and a slow sweep of the throttle says which.\n- **`r62`** — 0 stopped, 4 at idle, 2 off idle, flickering between 4 and 2 around 1300–1700 rpm. Holding exactly there for a while shows whether the flicker is hysteresis or something else.\n- **`co_trim`** — zero on ~6300 samples, and its slot is its own, so the zero is a value. One flicker anywhere kills the open-loop-variant hypothesis.\n\n## How to capture\n\n1. Warm it up fully first — the closed loop has to be in.\n2. Hold a steady small throttle, 3000–4000 rpm, for a full minute without moving your wrist. That is the part that matters and the part that is easy to skip.\n3. Then a slow sweep: closed to about a fifth of throttle over ten seconds, and back, twice.\n4. Sit at idle two minutes and let the 1300–1700 band flicker on its own."
+   "note": "# Steady throttle, with the lambda beside it\n\nThe 2026-09-10 ride answered the shape of these three and left the units open.\n\n- **`warmup_enrich`** (was `r6a`) runs 0…29, is non-zero **only off idle** — it lifts in the very sample the throttle leaves its stop and drops to 0 when it comes back — and its level falls with the coolant: 23.5 at 25–34 °C, 17.5 at 45–54, 12.3 at 65–74, ~9 from 75 °C up (r = −0.79 over 348 non-zero samples). Inside one activation it *holds* instead of decaying, so it is a warm-up enrichment applied off idle, not an accelerator-pump shot.\n- **`warmup_on`** (was `r5c`) is that correction's on/off half: `warmup_on = On` exactly when `warmup_enrich > 0` (680 of 693 samples; all 13 exceptions are single samples on a transition, where the two rli are answered one request apart). It is **not** the closed-throttle switch it was labelled as — the throttle rule agrees on 92 % of samples at best, at any threshold and any lag.\n- **`idle_mode`** (was `r62`) is settled: 0 engine stopped, 4 idle, 2 off idle, no overlap.\n\n## What is being settled now\n\n- **What quantity `warmup_enrich` carries.** Percent of fuel? A table index? `inj_period` is the witness: hold one throttle position and one rpm while the engine warms, and whatever `warmup_enrich` is worth shows up as a matching slope in the injection period.\n- **`co_trim`** — zero on ~7000 samples now, and its slot is its own, so the zero is a value. One flicker anywhere kills the open-loop-variant hypothesis.\n\n## How to capture\n\n1. Warm it up fully first — the closed loop has to be in.\n2. Hold a steady small throttle, 3000–4000 rpm, for a full minute without moving your wrist. That is the part that matters and the part that is easy to skip.\n3. Then a slow sweep: closed to about a fifth of throttle over ten seconds, and back, twice.\n4. Sit at idle two minutes."
   },
   {
-   "name": "NewByte",
+   "name": "Warmup",
    "keys": [
     "rpm",
     "throttle",
     "coolant_t",
     "vbat",
     "engine_state",
-    "r6e",
-    "r70",
-    "r3e",
-    "r5d",
-    "r5e",
-    "r5f",
-    "r63"
+    "warmup_enrich",
+    "warmup_on",
+    "idle_mode",
+    "inj_period",
+    "idle_step_base",
+    "idle_step_adj",
+    "lambda_f"
    ],
-   "note": "# The two that have never been recorded\n\n`r6e` and `r70` answer, have a slot of their own in the firmware, and have **never been in a preset** — every set so far missed them. There is no data on them at all, which makes them the cheapest thing left to learn something about.\n\nThe four word-sized ones ride along for a second chance: `r5d` `r5e` `r5f` `r63` held a flat zero through the rev limiter, full throttle, long overruns and a warm-up to 97 °C, so if they move at all it is under something that ride did not do. `r3e` has read a constant 52 through everything including a full cold start.\n\n## How to capture\n\nAn ordinary ride, but reach for the states the last one skipped:\n\n- stop in traffic long enough for the fan to cycle twice;\n- a hot restart after ten minutes standing;\n- ride with the side stand down and the clutch pulled at a standstill;\n- a gear change at low rpm, and one at the limiter;\n- if anything ever throws a fault light, that whole ride is worth keeping.\n\n## What counts as a result\n\nAny of the six leaving its usual value for even one sample. Write down what was happening and repeat it — one sample is a hint, twice is a channel."
+   "note": "# Cold start: what the enrichment is worth\n\nThe ride that named `warmup_enrich` started at 25 °C but never held still, so its level and the injection period moved for a dozen reasons at once. This preset exists to make that one comparison clean.\n\n## What is being settled\n\n- **The unit behind `warmup_enrich`.** At a fixed throttle and a fixed rpm, everything except the temperature is constant, so `inj_period` and `warmup_enrich` should fall together as the coolant climbs. The ratio between the two slopes is the multiplier the number carries.\n- **Whether `idle_step_base` and `idle_step_adj` follow the same schedule**, or the stepper and the enrichment are on separate curves.\n- **`warmup_on` at the boundary**: does the flag drop the instant `warmup_enrich` reaches 0, or does it hold the correction on at a zero level?\n\n## How to capture\n\nThe bike has to be **properly cold** — overnight, not an hour.\n\n1. Start recording before you touch the starter.\n2. Start it and let it idle untouched until the fan cycles once. That is the whole `idle_mode` = 4 branch in one piece.\n3. Then hold a steady 3000 rpm at a fixed throttle for two minutes without moving your wrist, coolant climbing under it. This is the part the answer comes from.\n4. Back to idle for a minute, then ride normally until it is fully hot.\n\n## What counts as a result\n\n`warmup_enrich` and `inj_period` falling together in step 3, at one throttle and one rpm. If they do not, the number is not a fuel multiplier and the name has to go back to being a question."
   }
  ],
  "free_note": "The rear bank — `lambda_r`, `lambda_int_r`, `lambda_reg_r`, `lambda_ctl_r` — is not in any of these on purpose. The firmware answers all four from a shared placeholder slot, and no sensor is fitted on this side, so nothing this motorcycle can do will move them. They stay named and listed because other Granpasso builds wire a second probe; proving them needs that bike, not another ride on this one."
