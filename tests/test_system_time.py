@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.web import system  # noqa: E402
 
 
-def _fake(tmp, tz="Europe/Sofia", ntp=False):
+def _fake(tmp, tz="Europe/Sofia", ntp=False, synced=False):
     """Point the module at a temp marker and record commands instead of running."""
     system.AUTO_MARKER = Path(tmp) / "time-synced"
     system._auto_done_fallback = False
@@ -24,7 +24,7 @@ def _fake(tmp, tz="Europe/Sofia", ntp=False):
     system._run_err = lambda cmd: (system.ran.append(" ".join(cmd)), (True, ""))[1]
     system.time_status = lambda: {
         "epoch": time.time(), "local": "now", "tz": tz,
-        "ntp_active": ntp, "ntp_synced": False,
+        "ntp_active": ntp, "ntp_synced": synced,
     }
     system._timedatectl_props = lambda: {"NTP": "yes" if ntp else "no"}
 
@@ -43,9 +43,37 @@ def test_auto_sync_runs_once_per_power_up():
         _fake(tmp)
         system.auto_sync(time.time() + 3600)
         system.ran.clear()
-        res = system.auto_sync(time.time() + 7200)      # a second tab shows up
+        res = system.auto_sync(time.time() + 30)        # a second tab shows up
         assert res["skipped"] == "already"
         assert system.ran == []                         # clock left alone
+
+
+def test_auto_sync_still_rescues_a_board_hours_out():
+    """The marker must not defend a clock that is wrong by hours.
+
+    A phone that keeps the page open reconnects its websocket across a board
+    reboot without ever loading the page, so the one offer per power-up can be
+    made by a tab whose own request was answered long before — and on
+    2026-09-10 a whole ride was written into the previous day because of it.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        _fake(tmp)
+        system.auto_sync(time.time() + 3600)
+        system.ran.clear()
+        res = system.auto_sync(time.time() + 20 * 3600, "Europe/Sofia")
+        assert res["ok"] and res.get("skipped") is None
+        assert any("set-time" in c for c in system.ran)
+
+
+def test_auto_sync_leaves_an_ntp_synced_board_alone():
+    """With a real time server reached, the browser is the suspect clock."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _fake(tmp, ntp=True, synced=True)
+        system.auto_sync(time.time() + 3600)
+        system.ran.clear()
+        res = system.auto_sync(time.time() + 20 * 3600)
+        assert res["skipped"] == "ntp"
+        assert system.ran == []
 
 
 def test_auto_sync_skips_when_already_on_time():

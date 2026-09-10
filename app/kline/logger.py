@@ -107,8 +107,10 @@ class KLineWorker(threading.Thread):
         self._raw_fh = None
         self._raw_path: Path | None = None
         self._raw_bytes = 0
-        # the root the open files live on, and when to next ask whether it moved
+        # the root and the day folder the open files live in, and when to next
+        # ask whether either moved
         self._open_root: Path | None = None
+        self._open_day: str | None = None
         self._root_check_at = 0.0
         # diagnostics follow the recording, so events are emitted only while it
         # runs; the link context is kept so link_up can open that file instead of
@@ -428,8 +430,10 @@ class KLineWorker(threading.Thread):
 
     def _log_target(self) -> Path:
         """The day folder inside the active root, created on demand."""
-        d = self.log_dir / day_name()
+        day = day_name()
+        d = self.log_dir / day
         d.mkdir(parents=True, exist_ok=True)
+        self._open_day = day            # what _reconcile_storage compares against
         return d
 
     def _reconcile_logging(self) -> None:
@@ -445,12 +449,18 @@ class KLineWorker(threading.Thread):
         self._reconcile_diag()
 
     def _reconcile_storage(self) -> None:
-        """Follow the log destination when it moves out from under the open file.
+        """Follow the log destination — and the day — out from under the open file.
 
         The stick can be pulled mid-ride, or the rider can switch destination
         from the phone. Either way the file is now on the wrong disk, so it is
         closed and reopened where writes actually land. Rate-limited to once a
         second because answering the question reads /proc/mounts.
+
+        The day folder is the same kind of move. The board has no battery-backed
+        clock, so a ride can start hours in the past and be corrected mid-way by
+        the first phone that offers its clock; midnight does it for free. Either
+        way the open file belongs to a folder that is no longer today's, and on
+        2026-09-10 a whole ride was filed under the previous day because of it.
         """
         if self._open_root is None:
             return
@@ -459,14 +469,20 @@ class KLineWorker(threading.Thread):
             return
         self._root_check_at = now + 1.0
         root = self.log_dir
-        if root == self._open_root:
+        day = day_name()
+        if root == self._open_root and day == self._open_day:
             return
-        self._diag("log_dest", frm=self._open_root.name, to=root.name)
+        if root != self._open_root:
+            self._diag("log_dest", frm=self._open_root.name, to=root.name)
+            reason = "storage_changed"
+        else:
+            self._diag("log_day", frm=self._open_day or "", to=day)
+            reason = "day_changed"
         if self._dec_fh is not None:
-            self._close_dec("storage_changed")
+            self._close_dec(reason)
             self._open_dec()
         if self._raw_fh is not None:
-            self._close_raw("storage_changed")
+            self._close_raw(reason)
             self._open_raw()
 
     def _reconcile_diag(self) -> None:
@@ -474,18 +490,25 @@ class KLineWorker(threading.Thread):
 
         Writing it around the clock buys nothing and costs SD-card life: what it
         is for is naming the hardware fault behind a log that split mid-ride.
+
+        The switch in Config -> System can be flipped mid-ride, so the truth is
+        the log's own state rather than what the worker last did to it: with the
+        switch off ``start()`` is a no-op and ``running`` stays False, and this
+        runs again next poll instead of believing a start that never happened.
         """
         if self.diag is None:
             return
         want = (self._dec_fh is not None or self._raw_fh is not None
                 or self._scan_fh is not None)
-        if want == self._diag_on:
+        on = bool(getattr(self.diag, "running", self._diag_on))
+        if want == on:
+            self._diag_on = on
             return
         try:
             if want:
                 self.diag.start()
-                self._diag_on = True
-                if self._link_ctx:
+                self._diag_on = bool(getattr(self.diag, "running", True))
+                if self._diag_on and self._link_ctx:
                     self._diag("link_up", **self._link_ctx)
             else:
                 self._diag_on = False
@@ -567,6 +590,7 @@ class KLineWorker(threading.Thread):
         self._close_raw(reason)
         self._close_scan()
         self._open_root = None
+        self._open_day = None
         self._reconcile_diag()
         self._link_ctx = {}
 
@@ -645,6 +669,7 @@ class KLineWorker(threading.Thread):
             self._raw_fh = None
             self.state.set_raw_file("", 0)
         self._open_root = None
+        self._open_day = None
         self._root_check_at = 0.0
 
     # -- main loop --------------------------------------------------------

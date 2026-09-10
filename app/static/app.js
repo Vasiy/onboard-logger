@@ -1267,9 +1267,30 @@ $("#markBtn").addEventListener("click", () => {
 $("#actPulse").addEventListener("change", savePulse);
 $("#actStopBtn").addEventListener("click", () => runTest("#actResult", "actuator/stop", "test.actStopped"));
 
+// No battery-backed RTC on the board: offer this browser's clock. Fire-and-forget
+// — the server holds the once-per-power-up marker (and re-syncs anyway when the
+// two clocks are minutes apart), so racing tabs cannot set the clock twice.
+let autoTimeOff = false;
+
+function autoTimeSync() {
+  if (autoTimeOff) return;
+  api("/api/system/time/auto", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      epoch: Date.now() / 1000,
+      tz: Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+    }),
+  }).catch(() => {});
+}
+
 function connectWS() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  // Every re-connect, not just the page load: a phone that keeps the page open
+  // reconnects the socket across a board reboot without ever loading it again,
+  // so the boot-time offer of the browser's clock never happened and a ride was
+  // logged under the previous day. The server ignores an offer it does not need.
+  ws.onopen = () => autoTimeSync();
   ws.onmessage = (ev) => { try { applySnapshot(JSON.parse(ev.data)); } catch (e) {} };
   ws.onclose = () => setTimeout(connectWS, 1500);
   ws.onerror = () => ws.close();
@@ -2861,18 +2882,8 @@ async function init() {
   initWake();
   try { cfg = await api("/api/config"); loc = cfg.locale || "en"; } catch (e) {}
   applyLocale(loc);
-  // No battery-backed RTC on the board: offer this browser's clock right away.
-  // Fire-and-forget — the server keeps the once-per-power-up marker, so racing
-  // tabs (or a reload) cannot set the clock twice.
-  if (!cfg || cfg.system?.auto_time_sync !== false) {
-    api("/api/system/time/auto", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        epoch: Date.now() / 1000,
-        tz: Intl.DateTimeFormat().resolvedOptions().timeZone || "",
-      }),
-    }).catch(() => {});
-  }
+  autoTimeOff = cfg ? cfg.system?.auto_time_sync === false : false;
+  autoTimeSync();
   // status maps ride along with the actuator catalog and are needed on the Logger
   // tab too (mapped channels render as text), so fetch them at boot
   loadActuators();

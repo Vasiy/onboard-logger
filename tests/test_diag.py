@@ -15,8 +15,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.kline.logger import KLineWorker  # noqa: E402
+from app.web import diag as diag_mod  # noqa: E402
 from app.web.diag import DiagLog, parse_kmsg, usb_facts  # noqa: E402
 from app.web.storage import day_name  # noqa: E402
+
+_real_day_name = diag_mod.day_name
 from app.web.led import Led  # noqa: E402
 from app.web.state import State  # noqa: E402
 
@@ -240,6 +243,43 @@ def test_apply_toggles_live():
         assert not d.enabled
         d.event("y")                                # ignored while off
         assert "Y" not in "".join(p.read_text() for p in Path(tmp).rglob("diag-*.log"))
+
+
+def test_ticking_the_switch_does_not_start_a_log_outside_a_ride():
+    """Enabling only permits the log; the ride is what starts it.
+
+    apply() used to call start() itself, so ticking the box on a parked bike
+    left the board writing a health snapshot every 5 s about an adapter that was
+    not there — found running exactly like that on 2026-09-10.
+    """
+    with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as root:
+        d = _diag(tmp, root, enabled=False)
+        d.apply({"enabled": True, "interval_s": 1, "max_mb": 1, "keep": 3, "kmsg": False})
+        assert d.enabled and d.running is False
+        assert list(Path(tmp).rglob("diag-*")) == []
+
+        w = KLineWorker(port="/dev/null", params_path=PARAMS, log_dir=tmp,
+                        state=State(), led=Led(), diag=d)
+        w._reconcile_logging()              # a ride log opens -> so does this one
+        assert d.running is True
+        w._close_all_logs("test")
+        assert d.running is False
+
+
+def test_the_diagnostics_file_follows_the_day():
+    """Midnight, or a clock corrected mid-ride, moves the file with the ride."""
+    with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as root:
+        d = _diag(tmp, root)
+        d.event("x")
+        first = Path(d.current_file())
+        diag_mod.day_name = lambda: "11-09-2026"
+        try:
+            d.event("y")
+            second = Path(d.current_file())
+        finally:
+            diag_mod.day_name = _real_day_name
+        assert second != first and second.parent.name == "11-09-2026"
+        assert "X" in first.read_text() and "Y" in second.read_text()
 
 
 def test_file_lands_in_the_day_folder():

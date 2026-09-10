@@ -154,6 +154,7 @@ function makeSandbox(opts = {}) {
     console,
     document,
     created,
+    sockets: [],                         // every WebSocket the app opened
     isSecureContext: false,
     navigator: {},                       // no clipboard by default: the board's http:// case
     location: { protocol: "http:", host: "192.168.4.1" },
@@ -173,7 +174,13 @@ function makeSandbox(opts = {}) {
     // applySnapshot() timestamps every snapshot; a frozen clock is enough here
     performance: { now: () => 0 },
     fetch: opts.fetch || (() => Promise.reject(new Error("offline"))),
-    WebSocket: function WebSocket() { return { close() {}, send() {} }; },
+    // every socket is kept: a harness fires its onopen to stand in for the
+    // reconnect the app does on its own after the board (or the AP) came back
+    WebSocket: function WebSocket() {
+      const ws = { close() {}, send() {} };
+      sandbox.sockets.push(ws);
+      return ws;
+    },
     // uploads (a firmware image, an update archive) go out as multipart form data
     FormData: function FormData() {
       return { isFormData: true, parts: [], append(k, v) { this.parts.push([k, v]); } };

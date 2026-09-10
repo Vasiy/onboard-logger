@@ -224,6 +224,15 @@ class DiagLog:
         return resolve_root(self._log_root)
 
     # -- lifecycle --------------------------------------------------------
+    @property
+    def running(self) -> bool:
+        """Whether the log is actually up — what the worker's gate compares to.
+
+        The switch alone does not say: enabling it from the Config tab only
+        permits the log, the ride is what starts it.
+        """
+        return bool(self._threads)
+
     def start(self) -> None:
         if not self.enabled or self._threads:
             return
@@ -270,7 +279,9 @@ class DiagLog:
         if want and not self.enabled:
             self.enabled = True
             self.kmsg = bool(c["kmsg"])
-            self.start()
+            # deliberately not started here: the log belongs to a ride, and only
+            # the worker knows whether one is open. Ticking the box on a parked
+            # bike used to open a file that recorded nothing but "no adapter".
         elif not want and self.enabled:
             self.stop()
             self.enabled = False
@@ -302,6 +313,7 @@ class DiagLog:
                 + (" " + raw if raw else "")
                 + (" " + rendered if rendered else "") + "\n")
         with self._lock:
+            self._roll_day_locked()
             if self._fh is None:
                 self._open_locked()
             if self._fh is None:
@@ -349,6 +361,18 @@ class DiagLog:
             # K-Line worker mid-poll, so hand it to a throwaway thread
             threading.Thread(target=self._archive, args=(path,),
                              name="diag-zip", daemon=True).start()
+
+    def _roll_day_locked(self) -> None:
+        """Let go of a file whose day folder is no longer today's.
+
+        The folder moves under an open file at midnight, and — with no RTC on
+        this board — whenever the clock is finally corrected mid-ride by a phone
+        or a time server. The ride logs follow it; the log that explains them
+        has to as well, or the two end up a day apart. Closing is enough: the
+        next line opens the file where it belongs.
+        """
+        if self._path is not None and self._path.parent.name != day_name():
+            self._close_locked(zip_it=self.zip_after)
 
     def _rotate_if_needed_locked(self) -> None:
         if self._fh is not None and self._bytes >= self.max_bytes:

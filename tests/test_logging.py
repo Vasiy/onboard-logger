@@ -7,10 +7,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from app.kline import logger as logger_mod  # noqa: E402
 from app.kline.logger import KLineWorker  # noqa: E402
+from app.web.diag import DiagLog  # noqa: E402
 from app.web.led import Led  # noqa: E402
 from app.web.storage import day_name  # noqa: E402
 from app.web.state import State  # noqa: E402
+
+_real_day_name = logger_mod.day_name
 
 PARAMS = str(Path(__file__).resolve().parent.parent / "config" / "params.json")
 
@@ -166,6 +170,73 @@ def test_diagnostics_run_only_while_a_log_is_open():
         w.set_logging_decoded(False)
         w._reconcile_logging()
         assert calls[-1] == "stop", calls
+
+
+def test_ride_logs_ignore_the_diagnostics_switch():
+    """Board diagnostics off must silence *that* log and nothing else.
+
+    Reported on 2026-09-10 as "no logs at all after unticking the box"; the ride
+    files turned out to be there but written under the previous day (the clock,
+    see test_the_open_log_follows_the_day). The two are unrelated by design and
+    this pins it: with the switch off the decoded CSV and the raw log still open,
+    still take rows, and no diag-*.log appears beside them.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        d = DiagLog(tmp, {"enabled": False, "kmsg": False})
+        w = KLineWorker(port="/dev/null", params_path=PARAMS, log_dir=tmp,
+                        state=State(), led=Led(), log_decoded_default=True,
+                        log_raw_default=True, diag=d)
+        w._reconcile_logging()
+        assert w._dec_fh is not None and w._raw_fh is not None
+        w._write_decoded({"rpm": 3000})
+        w._write_raw({"t": 1.0, "rli": 1, "st": "ok"})
+        assert d.running is False, "the switch is off: nothing to run"
+        assert list(Path(tmp).rglob("diag-*")) == []
+
+        # and flipping it off mid-ride does not touch the open ride files
+        d.apply({"enabled": True, "kmsg": False})
+        w._reconcile_logging()                      # a ride is open -> it starts
+        assert d.running is True
+        d.apply({"enabled": False, "kmsg": False})
+        w._reconcile_logging()
+        assert d.running is False
+        w._write_decoded({"rpm": 3200})
+        dec, raw = w._dec_path, w._raw_path
+        w._close_all_logs("test")
+        rows = Path(dec).read_text().splitlines()
+        assert len(rows) == 3, rows          # header + a sample either side
+        assert Path(raw).read_text().count("\n") == 1
+
+
+def test_the_open_log_follows_the_day():
+    """A clock jump (or midnight) moves the ride into the folder it belongs to.
+
+    The board has no battery-backed clock: it starts at whatever time it was
+    last shut down with and is corrected only when a phone or a time server
+    reaches it. On 2026-09-10 that correction arrived after the ride, so the
+    whole ride sat in the previous day's folder and the Logs tab, which groups
+    by day, showed nothing at all for today.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        w = _worker(tmp, dec=True, raw=True)
+        w._reconcile_logging()
+        w._write_decoded({"rpm": 1000})
+        first = w._dec_path
+        assert first.parent.name == day_name()
+
+        logger_mod.day_name = lambda: "11-09-2026"      # the clock jumps
+        try:
+            w._root_check_at = 0.0                      # the 1 s gate, not the rule
+            w._reconcile_logging()
+            assert w._dec_path.parent.name == "11-09-2026"
+            assert w._raw_path.parent.name == "11-09-2026"
+            w._write_decoded({"rpm": 2000})
+            second = w._dec_path
+            w._close_all_logs("test")
+        finally:
+            logger_mod.day_name = _real_day_name
+        assert len(Path(first).read_text().splitlines()) == 2   # header + 1 row
+        assert len(Path(second).read_text().splitlines()) == 2  # nothing lost
 
 
 def test_link_events_are_silent_while_nothing_is_recorded():

@@ -13,6 +13,12 @@ from pathlib import Path
 # power-cycle boundary the feature is about.
 AUTO_MARKER = Path("/run/onboard-logger/time-synced")
 _auto_done_fallback = False      # dev hosts without a writable /run
+# ...except when the clock is wildly out. The marker exists so that every page
+# load does not nudge the clock; it must not defend a board that is hours wrong.
+# That is what happened on 2026-09-10: the phone kept the page open across a
+# board reboot, the websocket reconnected without a page load, nothing ever
+# offered the clock, and a whole ride was written into the previous day's folder.
+RESYNC_DRIFT_S = 120.0
 
 
 def _run_detached(cmd: list[str]) -> dict:
@@ -163,14 +169,21 @@ def auto_sync(epoch: float, tz: str = "", threshold: float = 2.0) -> dict:
     load. A failure — nonsense timestamp, no timedatectl — does not burn the
     shot: the next client that shows up can still fix the clock.
     """
-    if auto_sync_done():
-        return {"ok": True, "skipped": "already", **time_status()}
     try:
         epoch = float(epoch)
     except (TypeError, ValueError):
         return {"ok": False, "error": "err.bad_time"}
 
     drift = abs(epoch - time.time())
+    if auto_sync_done():
+        if drift <= RESYNC_DRIFT_S:
+            return {"ok": True, "skipped": "already", "drift": round(drift, 3),
+                    **time_status()}
+        st = time_status()
+        if st["ntp_synced"]:
+            # a real time server has spoken on this board; a browser that
+            # disagrees by minutes is the clock more likely to be wrong
+            return {"ok": True, "skipped": "ntp", "drift": round(drift, 3), **st}
     if drift <= threshold:
         # close enough: don't jump the clock mid-log, but do adopt the timezone
         st = time_status()
