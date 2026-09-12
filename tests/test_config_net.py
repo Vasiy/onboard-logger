@@ -51,6 +51,22 @@ def test_defaults_carry_new_fields():
     assert cfg["wifi"]["client"]["ipv4"] == "dhcp"
 
 
+def test_spark_span_bounds():
+    # the tile history window is board config, so a hand-edited config.json is
+    # the one way a value outside the slider's 3..30 s can arrive
+    with tempfile.TemporaryDirectory() as tmp:
+        cm = _cm(tmp)
+        assert _cfg()["ui"]["spark_s"] == 3
+        for ok in (3, 10, 30):
+            cm.validate(_cfg(ui__spark_s=ok))
+        for bad in (2, 0, 31, 900, "soon"):
+            try:
+                cm.validate(_cfg(ui__spark_s=bad))
+            except ValueError:
+                continue
+            raise AssertionError(f"expected ValueError for spark_s={bad!r}")
+
+
 def test_dnsmasq_router_option():
     with tempfile.TemporaryDirectory() as tmp:
         cm = _cm(tmp)

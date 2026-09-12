@@ -209,6 +209,15 @@ class ConfigManager:
         if not mp.startswith("/") or ".." in mp:
             raise ConfigError("cfgerr.mount_point")
 
+        # how far back a tile's sparkline looks; the slider offers 3..30 s and a
+        # buffer outside that is either too short to read or pointlessly long
+        try:
+            spark = int(cfg.get("ui", {}).get("spark_s", 3))
+        except (TypeError, ValueError):
+            raise ConfigError("cfgerr.spark_span")
+        if not (3 <= spark <= 30):
+            raise ConfigError("cfgerr.spark_span")
+
     # -- rendering ---------------------------------------------------------
     def render_hostapd(self, cfg: dict) -> str:
         wifi = dict(cfg["wifi"])

@@ -75,6 +75,7 @@ function applyLocale(loc) {
   if (ls) ls.value = LOCALE;
   if (catalog.length) renderParams();
   if (presets) renderPresets();
+  showSparkSpan(null);                 // "s" is translated too
   if (lastSnapshot) applySnapshot(lastSnapshot);
 }
 
@@ -362,9 +363,28 @@ function updateValues(values) {
   });
 }
 
-// per-parameter rolling history (last 3 s) for the inline sparkline
+// per-parameter rolling history for the inline sparkline
 const spark = {};
-const SPARK_MS = 3000;
+// How far back a tile looks. It lives in the board's config (ui.spark_s) rather
+// than in localStorage beside the theme: how much history a reading needs is a
+// property of the bike being watched, not of the phone that connected — and a
+// rider comparing a warm-up against a fuel trim should not have to re-pick the
+// window on every device. The bounds match the slider and config_mgr.validate().
+const SPARK_MIN_S = 3, SPARK_MAX_S = 30;
+let sparkMs = SPARK_MIN_S * 1000;
+
+function sparkSpanMs() { return sparkMs; }
+function sparkHist(key) { return spark[key] || []; }
+
+// The single mutator, so a hand-edited config.json or a stale field cannot put
+// the window outside what the buffer and the x-scale expect.
+function setSparkSpan(sec) {
+  const v = Number(sec);
+  if (Number.isFinite(v)) {
+    sparkMs = Math.min(SPARK_MAX_S, Math.max(SPARK_MIN_S, Math.round(v))) * 1000;
+  }
+  return sparkMs;
+}
 const isLoggerActive = () => $("#tab-logger").classList.contains("is-active");
 
 // Channels whose sparkline gets a fixed window instead of auto-scaling to
@@ -393,14 +413,14 @@ function pushSpark(values) {
     const arr = spark[ch.key] || (spark[ch.key] = []);
     const v = values[ch.key];
     if (Number.isFinite(v)) arr.push([now, v]);
-    const cut = now - SPARK_MS;
+    const cut = now - sparkMs;
     while (arr.length && arr[0][0] < cut) arr.shift();
   });
 }
 
 function drawSparks() {
   $$("#params .prow").forEach((row) =>
-    drawSpark(row.querySelector(".spark"), spark[row.dataset.key] || [],
+    drawSpark(row.querySelector(".spark"), sparkHist(row.dataset.key),
               row.classList.contains("off"), fixedSpan(row.dataset.key))
   );
 }
@@ -418,7 +438,7 @@ function drawSpark(cv, hist, off, span) {
   // the one thing worth seeing, and clipping the line would hide exactly that
   if (span) { mn = Math.min(span.mn, mn); mx = Math.max(span.mx, mx); }
   const range = (mx - mn) || 1, t1 = hist[hist.length - 1][0], pad = 2;
-  const px = (t) => pad + ((t - (t1 - SPARK_MS)) / SPARK_MS) * (w - 2 * pad);
+  const px = (t) => pad + ((t - (t1 - sparkMs)) / sparkMs) * (w - 2 * pad);
   const py = (v) => h - pad - ((v - mn) / range) * (h - 2 * pad);
   ctx.strokeStyle = cssVar("--info") || "#3aa0ff"; ctx.globalAlpha = off ? 0.5 : 1; ctx.lineWidth = 1.25;
   ctx.beginPath();
@@ -1310,6 +1330,7 @@ async function loadConfig() {
   $("#clientMask").value = prefixToMask(getNested(cfg, "wifi.client.prefix") || 24);
   applyWifiMode();
   $("#channelSelect").value = cfg.wifi.auto_channel ? "auto" : String(cfg.wifi.channel);
+  showSparkSpan(getNested(cfg, "ui.spark_s"));
   cfgLoaded = cfg;
   markNetDirty();
   loadWifiChart();
@@ -1512,7 +1533,11 @@ const NET_FIELD = (name) => /^(wifi|network|dhcp)\./.test(name) || name === "hos
 
 function fieldValue(el) {
   if (el.type === "checkbox") return el.checked;
-  if (el.type === "number") return el.value === "" ? null : Number(el.value);
+  // a range always has a value, but it is a string like every other input and
+  // the board stores a number
+  if (el.type === "number" || el.type === "range") {
+    return el.value === "" ? null : Number(el.value);
+  }
   return el.value;
 }
 
@@ -1631,6 +1656,24 @@ $("#cfgForm").addEventListener("change", (e) => {
 
 // locale also switches the UI instantly; the change listener above persists it
 $("#localeSelect").addEventListener("change", (e) => applyLocale(e.target.value));
+
+// The tile history window. A range rather than a select: one thumb, no iOS
+// modal over the form, and a second either way does not matter. The number
+// beside it follows the thumb (the tiles themselves are on a hidden tab while
+// the Config form is open, so there is nothing to watch redraw); the value goes
+// to the board on release, through the ordinary non-network autosave.
+function showSparkSpan(sec) {
+  const el = $("#sparkSpan");
+  // an empty argument means "repaint what is already set": a locale switch has
+  // no new number, and Number("") is 0, which would silently snap to the floor
+  const cur = el && el.value !== "" ? el.value : sparkSpanMs() / 1000;
+  const ms = setSparkSpan(sec != null && sec !== "" ? sec : cur);
+  if (el) el.value = String(ms / 1000);
+  const out = $("#sparkSpanVal");
+  if (out) out.textContent = `${ms / 1000} ${t("unit.sec")}`;
+}
+
+$("#sparkSpan")?.addEventListener("input", (e) => showSparkSpan(e.target.value));
 
 // ---------- board clock ----------
 // No internet on the bike, so timesyncd may be running and still be wrong. The

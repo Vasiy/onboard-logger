@@ -78,6 +78,9 @@
     "auto_mount": true,
     "poll_s": 3
   },
+  "ui": {
+    "spark_s": 3
+  },
   "locale": "en",
   "log_dir": "/root/k-line",
   "firmware_dir": "/root/firmware",

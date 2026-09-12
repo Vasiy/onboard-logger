@@ -327,6 +327,29 @@ def test_a_derived_channel_is_selectable_but_never_polled():
     assert [p.key for p in m.params if not p.derived] == ["rpm"]
 
 
+def test_params_survive_a_key_this_build_does_not_know():
+    """``/etc/onboard-logger/params.json`` wins over the repo copy, and the board
+    is not a checkout -- so a file written by a newer line of the code reaches an
+    older ``Param(**p)`` as an unexpected keyword. That raised inside the lifespan
+    and uvicorn exited 3: the bike lost its whole UI over one JSON key (a deploy
+    from a stale tree did exactly that on 2026-09-12, over ``derived``). An entry
+    that cannot be built costs one channel; it must never cost the logger."""
+    import json
+    import tempfile
+    raw = {"poll_interval_ms": 100, "poll_timeout_ms": 100, "params": [
+        {"key": "gear", "name": "Gear", "rli": 0, "derived": "gear", "from_the_future": 7},
+        {"key": "rpm", "name": "RPM", "rli": 1, "recip": 15000000.0},
+        {"name": "no key at all", "rli": 2},
+    ]}
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
+        json.dump(raw, fh)
+        path = fh.name
+    m = ParamMap.load(path)
+    assert [p.key for p in m.params] == ["gear", "rpm"]   # unknown key dropped, entry kept
+    assert m.params[0].derived == "gear"                  # the keys it does know survive
+    Path(path).unlink()
+
+
 def test_fast_init_no_crash():
     t = KLineTransport("/dev/null")
     t.ser = FakeSerial(lambda tx: b"")

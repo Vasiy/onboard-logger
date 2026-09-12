@@ -650,6 +650,17 @@
                 </select>
               </label>
             </div>
+            <!-- board config, not a phone preference like the two above: the window
+                 a tile's sparkline shows. A range rather than a select — one thumb
+                 and no iOS modal over the form. -->
+            <label><span data-i18n="cfg.sparkSpan">Tile history</span>
+              <span class="range-row">
+                <input id="sparkSpan" name="ui.spark_s" type="range"
+                       min="3" max="30" step="1" value="3" />
+                <output id="sparkSpanVal" for="sparkSpan">3 s</output>
+              </span>
+            </label>
+            <p class="hint" data-i18n="cfg.sparkSpanHint">How far back the little graph on each picked parameter looks. A short window shows the last twitch, a long one shows a warm-up or a fuel-trim drift.</p>
             <label class="inline"><input id="wakeToggle" type="checkbox" />
               <span data-i18n="cfg.wake">Keep this screen awake</span></label>
             <p class="hint" id="wakeHint" data-i18n="cfg.wakeHint">Holds the phone awake while this page is open, so a ride does not end with a locked screen. It costs battery, and it is armed by the first touch after the page loads.</p>

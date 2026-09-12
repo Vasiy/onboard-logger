@@ -241,6 +241,36 @@ select { appearance: none; -webkit-appearance: none;
 }
 input:focus, select:focus { border-color: var(--info); box-shadow: var(--focus); outline: none; }
 input[disabled], select[disabled] { opacity: .55; }
+/* A slider and its readout on one line. The thumb is 28 px: a gloved thumb on a
+   phone at the kerbside, not a mouse pointer. */
+.range-row { display: flex; align-items: center; gap: 12px; margin-top: 6px; }
+.range-row output {
+  flex: none; min-width: 48px; text-align: right; color: var(--fg);
+  font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+input[type=range] {
+  flex: 1; min-width: 0; height: 28px; margin: 0; padding: 0;
+  appearance: none; -webkit-appearance: none; background: transparent;
+  accent-color: var(--accent);
+}
+input[type=range]::-webkit-slider-runnable-track {
+  height: 6px; border-radius: 3px; background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+input[type=range]::-moz-range-track {
+  height: 6px; border-radius: 3px; background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+input[type=range]::-webkit-slider-thumb {
+  appearance: none; -webkit-appearance: none; width: 28px; height: 28px;
+  margin-top: -12px; border-radius: 50%; background: var(--accent);
+  border: 1px solid var(--border);
+}
+input[type=range]::-moz-range-thumb {
+  width: 28px; height: 28px; border-radius: 50%; background: var(--accent);
+  border: 1px solid var(--border);
+}
+
 .row { display: flex; gap: 12px; }
 .row > label { flex: 1; }
 .row > .btn { flex: 1; width: auto; }
@@ -782,7 +812,7 @@ body.is-stale .ecu-banner { filter: grayscale(1); }
 
 /* ---------- parameters: read mode ---------- */
 /* Picked channels as tiles: the number is what you read at a glance from a
-   handlebar mount, the name and the 3 s sparkline are supporting detail. The
+   handlebar mount, the name and the sparkline are supporting detail. The
    preset row above stays visible — it is the one way to change the set here. */
 .params--view {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;

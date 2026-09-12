@@ -9,8 +9,10 @@
 // climbing off the top.
 //
 // The window only ever widens. A temperature that really leaves it inside the
-// three-second trace is the one thing worth seeing, and clipping would hide
-// exactly that.
+// trace is the one thing worth seeing, and clipping would hide exactly that.
+//
+// How long that trace is is board config (ui.spark_s, 3..30 s), so the second
+// half of this harness pins the buffer's trimming and the x-scale against it.
 //
 // Snapshots go in through applySnapshot(), the way they arrive over the
 // WebSocket, so the catalog and the sparkline buffer are filled by the same
@@ -35,10 +37,14 @@ function snap(values) {
   };
 }
 
-function makeSandbox() {
+function makeSandbox(cfg) {
   const sb = baseSandbox({
     fetch(url) {
-      const body = url === "/api/config" ? { logging: {}, diag: {} }
+      // loadConfig() reads the Wi-Fi block unconditionally, so the stub answer
+      // carries one even for the tests that only care about the tile window
+      const base = { logging: {}, diag: {}, dhcp: {}, network: {},
+                     wifi: { mode: "ap", auto_channel: true, channel: 6, client: { prefix: 24 } } };
+      const body = url === "/api/config" ? Object.assign(base, cfg)
         : url === "/api/addons" ? { addons: [] }
         : { files: [] };
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) });
@@ -67,15 +73,16 @@ const feed = (sb, values) => sb.window.applySnapshot(snap(values));
 const span = (sb, key) => sb.window.fixedSpan(key);
 
 /* A canvas that records where the line was actually put. Height 20, pad 2, so
-   the plotted band is 16 px: y=18 is its bottom and y=2 its top. */
+   the plotted band is 16 px: y=18 is its bottom and y=2 its top. Width 100 with
+   the same padding puts the window's start at x=2 and its newest point at 98. */
 function fakeCanvas() {
-  const ys = [];
+  const ys = [], xs = [];
   return {
-    ys,
+    ys, xs,
     clientWidth: 100, clientHeight: 20, width: 0, height: 0,
     getContext: () => ({
       setTransform() {}, clearRect() {}, beginPath() {}, stroke() {},
-      moveTo(x, y) { ys.push(y); }, lineTo(x, y) { ys.push(y); },
+      moveTo(x, y) { xs.push(x); ys.push(y); }, lineTo(x, y) { xs.push(x); ys.push(y); },
       strokeStyle: "", globalAlpha: 1, lineWidth: 1,
     }),
   };
@@ -86,6 +93,16 @@ const draw = (sb, hist, sp) => {
   sb.window.drawSpark(cv, hist, false, sp);
   return cv.ys;
 };
+
+const drawXs = (sb, hist, sp) => {
+  const cv = fakeCanvas();
+  sb.window.drawSpark(cv, hist, false, sp);
+  return cv.xs;
+};
+
+// the sandbox freezes performance.now(); the buffer is trimmed against it, so a
+// harness that wants to age a sample moves the clock itself
+const at = (sb, ms) => { sb.performance.now = () => ms; };
 
 test("the window is six degrees wide, centred on the reading", () => {
   const sb = makeSandbox();
@@ -173,6 +190,61 @@ test("a steady warm-up keeps the trace on screen instead of ramping off it", () 
   eq(ys.length, 3);
   assert(Math.min(...ys) > 2, "nothing is pinned to the top: " + ys.join(","));
   assert(Math.max(...ys) < 18, "nor to the bottom: " + ys.join(","));
+});
+
+/* ---------- the history window is configurable (ui.spark_s, 3..30 s) ---------- */
+
+test("the window defaults to three seconds and clamps to the slider's range", () => {
+  const sb = makeSandbox();
+  eq(sb.window.sparkSpanMs(), 3000, "default");
+  eq(sb.window.setSparkSpan(10), 10000);
+  eq(sb.window.setSparkSpan(30), 30000);
+  eq(sb.window.setSparkSpan(31), 30000, "above the maximum");
+  eq(sb.window.setSparkSpan(2), 3000, "below the minimum");
+  eq(sb.window.setSparkSpan(7.4), 7000, "whole seconds");
+  eq(sb.window.setSparkSpan("soon"), 7000, "junk leaves the window alone");
+});
+
+test("the board's value is what the window ends up being", async () => {
+  const sb = makeSandbox({ ui: { spark_s: 12 } });
+  await sb.window.loadConfig();
+  eq(sb.window.sparkSpanMs(), 12000);
+});
+
+test("a board that sends no ui section keeps the three-second window", async () => {
+  const sb = makeSandbox();
+  await sb.window.loadConfig();
+  eq(sb.window.sparkSpanMs(), 3000);
+});
+
+test("the buffer keeps exactly the configured window", () => {
+  const sb = makeSandbox();
+  sb.window.setSparkSpan(10);
+  at(sb, 0);      feed(sb, { rpm: 1000 });
+  at(sb, 8000);   feed(sb, { rpm: 2000 });
+  eq(sb.window.sparkHist("rpm").length, 2, "8 s back is inside a 10 s window");
+  at(sb, 11000);  feed(sb, { rpm: 3000 });
+  eq(sb.window.sparkHist("rpm").length, 2, "the first sample has aged out");
+  eq(sb.window.sparkHist("rpm")[0][1], 2000);
+  // shortening the window drops what no longer fits at the next sample
+  sb.window.setSparkSpan(3);
+  at(sb, 12000);  feed(sb, { rpm: 4000 });
+  eq(sb.window.sparkHist("rpm").length, 2, "only 11 s and 12 s survive a 3 s window");
+  eq(sb.window.sparkHist("rpm")[0][1], 3000);
+});
+
+test("the x axis is the window, so the same trace stretches when it widens", () => {
+  const sb = makeSandbox();
+  // a sample five seconds old: outside a 3 s window, mid-way through a 10 s one
+  const hist = [[0, 10], [5000, 20]];
+  sb.window.setSparkSpan(10);
+  const wide = drawXs(sb, hist, null);
+  eq(wide[0].toFixed(2), "50.00", "5 s back is half-way across a 10 s window");
+  eq(wide[1].toFixed(2), "98.00", "the newest sample is always at the right edge");
+  sb.window.setSparkSpan(3);
+  const narrow = drawXs(sb, hist, null);
+  eq(narrow[1].toFixed(2), "98.00");
+  assert(narrow[0] < 0, "the same sample falls off the left of a 3 s window: " + narrow[0]);
 });
 
 (async () => {

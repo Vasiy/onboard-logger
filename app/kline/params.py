@@ -16,7 +16,7 @@ still accepted and auto-converted.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 
 
@@ -73,6 +73,30 @@ class Param:
         return round(raw * self.scale + self.bias, self.digits)
 
 
+_PARAM_KEYS = {f.name for f in fields(Param)}
+
+
+def _make_param(p: dict) -> Param | None:
+    """Build one Param from a params.json entry, surviving what this build does
+    not understand.
+
+    params.json is data, and the copy in /etc wins over the repo one: a key from
+    a newer build, or a hand edit made on the board, used to reach ``Param(**p)``
+    as an unexpected keyword and take the whole service down from inside the
+    lifespan — uvicorn exits 3 and :80 is dead, which on a bike means no UI at
+    all (a ``"derived": "gear"`` left on the board did exactly that). An unusable
+    entry costs one channel; it must never cost the logger.
+    """
+    extra = sorted(k for k in p if k not in _PARAM_KEYS)
+    if extra:
+        print(f"[params] {p.get('key', '?')}: unknown key(s) ignored: {', '.join(extra)}")
+    try:
+        return Param(**{k: v for k, v in p.items() if k in _PARAM_KEYS})
+    except TypeError as exc:        # missing key/name/rli: the entry is not a channel
+        print(f"[params] {p.get('key', '?')}: skipped ({exc})")
+        return None
+
+
 @dataclass
 class ParamMap:
     poll_interval_ms: int
@@ -83,7 +107,7 @@ class ParamMap:
     def load(cls, path: str | Path) -> "ParamMap":
         raw = json.loads(Path(path).read_text())
         if raw.get("params"):
-            params = [Param(**p) for p in raw["params"]]
+            params = [q for q in (_make_param(p) for p in raw["params"]) if q]
         else:  # legacy single-block schema -> one rli, per-channel offsets (+2 for SID+id)
             rli = int(raw.get("record_local_id", 1))
             params = [
