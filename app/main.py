@@ -326,6 +326,27 @@ def _norm_note(raw) -> str:
     return str(raw or "")[:NOTE_MAX]
 
 
+def _norm_order(raw, valid: set[str]) -> list[str]:
+    """One tile order, filtered and de-duped. The same cut for a slot and for the
+    free selection, so there is one answer to "what may this name".
+
+    An order ranks channels; it is deliberately *not* checked against that slot's
+    own keys. The two fields are written at different moments — a tick rewrites
+    the keys while the order stands — so filtering here would delete a channel's
+    place the instant it came off, and ticking it back on would drop it at the
+    end. The resolver in the UI ignores whatever is not currently selected, so a
+    spare entry costs nothing. The free order has no key list to check against at
+    all.
+    """
+    out, seen = [], set()
+    for k in raw if isinstance(raw, list) else []:
+        k = str(k)
+        if k in valid and k not in seen:
+            seen.add(k)
+            out.append(k)
+    return out
+
+
 def _selectable_keys() -> set[str]:
     """Keys a selection may name: everything the catalog carries minus the rli the
     firmware answers from a shared placeholder slot. One answer, so a dead channel
@@ -335,10 +356,10 @@ def _selectable_keys() -> set[str]:
 
 def _norm_presets(raw) -> list[dict]:
     """Coerce anything into exactly PRESET_SLOTS slots. The only validation point:
-    names are trimmed to PRESET_NAME_MAX, notes to NOTE_MAX, keys are filtered
-    against the live catalog (a params.json edit can retire a channel a preset
-    still names) and de-duped with their order kept — the decoded CSV writes its
-    columns in selection order."""
+    names are trimmed to PRESET_NAME_MAX, notes to NOTE_MAX, keys and the tile
+    order are filtered against the live catalog (a params.json edit can retire a
+    channel a preset still names) and de-duped with their order kept — the decoded
+    CSV writes its columns in selection order."""
     valid = _selectable_keys()
     out: list[dict] = []
     items = raw if isinstance(raw, list) else []
@@ -351,7 +372,8 @@ def _norm_presets(raw) -> list[dict]:
             if k in valid and k not in seen:
                 seen.add(k)
                 keys.append(k)
-        out.append({"name": name, "keys": keys, "note": _norm_note(item.get("note"))})
+        out.append({"name": name, "keys": keys, "note": _norm_note(item.get("note")),
+                    "order": _norm_order(item.get("order"), valid)})
     return out
 
 
@@ -366,24 +388,30 @@ def _boot_selection(saved, presets: list[dict], valid: set[str]) -> list[str]:
     return sel
 
 
-def _save_presets(presets: list[dict], free_note: str = "") -> None:
+def _save_presets(presets: list[dict], free_note: str = "",
+                  free_order: list[str] | None = None) -> None:
     try:
         _presets_path().write_text(json.dumps(
-            {"slots": presets, "free_note": free_note}, ensure_ascii=False))
+            {"slots": presets, "free_note": free_note,
+             "free_order": list(free_order or [])}, ensure_ascii=False))
     except OSError:
         pass
 
 
 def _split_presets_file(raw):
-    """(slots, free_note) out of either shape of presets.json.
+    """(slots, free_note, free_order) out of any shape of presets.json.
 
     The file was a bare list of slots before notes existed, and that is what is
-    sitting in /etc on every board today. Reading only the new shape would drop
-    three working presets on the first start after an update.
+    sitting in /etc on every board today; the shape after that carried the slots
+    and the free note but no tile order. Reading only the newest would drop three
+    working presets on the first start after an update. A missing order reads as
+    an empty one, which renders in catalog order — exactly what the board did
+    before the tiles could be dragged, so no migration is needed.
     """
     if isinstance(raw, dict):
-        return raw.get("slots"), _norm_note(raw.get("free_note"))
-    return raw, ""
+        return (raw.get("slots"), _norm_note(raw.get("free_note")),
+                _norm_order(raw.get("free_order"), _selectable_keys()))
+    return raw, "", []
 
 
 def _load_presets() -> list | None:
@@ -493,9 +521,9 @@ async def lifespan(app: FastAPI):
     worker.start()
     # the catalog is up by now, so the filter in _norm_presets has something to
     # filter against
-    _slots, _free = _split_presets_file(_load_presets())
+    _slots, _free, _free_order = _split_presets_file(_load_presets())
     _presets = _norm_presets(_slots)
-    state.set_presets(_presets, _free)
+    state.set_presets(_presets, _free, _free_order)
     # Restore the selection: what the rider last had wins, then the first preset as
     # the factory default, then the named-default set the worker already applied.
     # The first preset is the default only when there is nothing to remember — it
@@ -719,16 +747,21 @@ async def set_presets(payload: dict):
     change what is polled — applying one goes through /api/selected like any other
     change of the selection.
 
-    `free_note` belongs to a hand-picked selection, which has no slot to live in:
-    which preset is "active" is derived from the live selection, never stored, so
-    a set that matches none of them still needs somewhere to keep its note.
+    `free_note` and `free_order` belong to a hand-picked selection, which has no
+    slot to live in: which preset is "active" is derived from the live selection,
+    never stored, so a set that matches none of them still needs somewhere to keep
+    its note and the order its tiles sit in.
     """
     presets = _norm_presets(payload.get("presets", []))
-    free = _norm_note(payload.get("free_note", state.snapshot().get("free_note", "")))
-    state.set_presets(presets, free)
-    _save_presets(presets, free)
     snap = state.snapshot()
-    return {"presets": snap["presets"], "free_note": snap["free_note"]}
+    free = _norm_note(payload.get("free_note", snap.get("free_note", "")))
+    free_order = _norm_order(payload.get("free_order", snap.get("free_order", [])),
+                             _selectable_keys())
+    state.set_presets(presets, free, free_order)
+    _save_presets(presets, free, free_order)
+    snap = state.snapshot()
+    return {"presets": snap["presets"], "free_note": snap["free_note"],
+            "free_order": snap["free_order"]}
 
 
 def _parse_rli(v, default: int) -> int:

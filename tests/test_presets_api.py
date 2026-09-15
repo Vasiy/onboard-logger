@@ -32,10 +32,10 @@ def test_three_slots_whatever_comes_in():
                 [{}] * 5, [1, 2, 3]):
         out = main._norm_presets(raw)
         assert len(out) == main.PRESET_SLOTS, f"{raw!r} -> {out!r}"
-        assert all(set(p) == {"name", "keys", "note"} for p in out), out
+        assert all(set(p) == {"name", "keys", "note", "order"} for p in out), out
     # the one real slot in that third case survived
     assert main._norm_presets([{"name": "a", "keys": ["rpm"]}])[0] == \
-        {"name": "a", "keys": ["rpm"], "note": ""}
+        {"name": "a", "keys": ["rpm"], "note": "", "order": []}
 
 
 def test_name_is_trimmed_then_clipped():
@@ -71,8 +71,8 @@ def test_endpoint_normalises_stores_and_answers():
             {"name": "  Dyno  ", "keys": ["rpm", "nope", "tmot"]},
             {"name": "much too long", "keys": []},
         ]}))
-        assert r["presets"][0] == {"name": "Dyno", "keys": ["rpm", "tmot"], "note": ""}, \
-        r["presets"][0]
+        assert r["presets"][0] == {"name": "Dyno", "keys": ["rpm", "tmot"], "note": "",
+                                   "order": []}, r["presets"][0]
         assert r["presets"][1]["name"] == "much too", r["presets"][1]
         assert len(r["presets"]) == main.PRESET_SLOTS
         # what came back is what the snapshot serves and what landed on disk
@@ -82,6 +82,7 @@ def test_endpoint_normalises_stores_and_answers():
         on_disk = json.loads(path.read_text())
         assert on_disk["slots"] == r["presets"], on_disk
         assert on_disk["free_note"] == r["free_note"]
+        assert on_disk["free_order"] == r["free_order"]
 
 
 def test_first_preset_is_the_boot_default_but_never_an_override():
@@ -165,15 +166,18 @@ def test_the_old_bare_list_still_loads():
     only the new shape would drop three working presets on the first start after
     an update."""
     old = [{"name": "Cold", "keys": ["rpm"]}, {"name": "Adv", "keys": ["vbat"]}]
-    slots, free = main._split_presets_file(old)
-    assert slots == old and free == ""
-    new = {"slots": old, "free_note": "hello"}
-    slots, free = main._split_presets_file(new)
-    assert slots == old and free == "hello"
+    slots, free, order = main._split_presets_file(old)
+    assert slots == old and free == "" and order == []
+    # the shape that shipped with the notes, before the tile order existed
+    slots, free, order = main._split_presets_file({"slots": old, "free_note": "hello"})
+    assert slots == old and free == "hello" and order == []
+    slots, free, order = main._split_presets_file(
+        {"slots": old, "free_note": "hello", "free_order": ["vbat", "rpm"]})
+    assert slots == old and free == "hello" and order == ["vbat", "rpm"]
     # and anything else does not raise
     for junk in (None, "nonsense", 7):
-        slots, free = main._split_presets_file(junk)
-        assert free == ""
+        slots, free, order = main._split_presets_file(junk)
+        assert free == "" and order == []
 
 
 def test_the_file_round_trips_through_disk():
@@ -183,11 +187,14 @@ def test_the_file_round_trips_through_disk():
         old_path = main._presets_path
         main._presets_path = lambda: path
         try:
-            presets = main._norm_presets([{"name": "a", "keys": ["rpm"], "note": "keep me"}])
-            main._save_presets(presets, "free too")
-            slots, free = main._split_presets_file(main._load_presets())
+            presets = main._norm_presets([{"name": "a", "keys": ["rpm"], "note": "keep me",
+                                           "order": ["vbat", "rpm"]}])
+            main._save_presets(presets, "free too", ["tmot"])
+            slots, free, order = main._split_presets_file(main._load_presets())
             assert main._norm_presets(slots)[0]["note"] == "keep me"
+            assert main._norm_presets(slots)[0]["order"] == ["vbat", "rpm"]
             assert free == "free too"
+            assert order == ["tmot"]
             # written as text, not as escaped code points: a Russian note has to
             # stay readable to anyone opening the file on the board
             main._save_presets(main._norm_presets(
@@ -240,6 +247,90 @@ def test_a_dead_rli_cannot_enter_a_preset_or_a_selection():
     # a board that predates the flag sends no `dead` at all -- nothing is dropped
     main.state.set_catalog([{"key": "rpm"}, {"key": "r72"}], [])
     assert main._selectable_keys() == {"rpm", "r72"}
+
+
+# ---------- tile order ----------
+# Which order the read-mode tiles sit in is a property of the preset, like its
+# note: it rides on the board so any phone that joins the AP sees the same
+# layout. It is deliberately NOT part of the selection -- set_selected() rolls
+# the decoded CSV to a new file, so a drag would shred a ride into fragments.
+
+def test_an_order_is_filtered_and_deduped_like_the_keys():
+    _catalog()
+    out = main._norm_presets([{"name": "a", "keys": ["rpm"],
+                               "order": ["tmot", "gone", "rpm", "tmot"]}])
+    assert out[0]["order"] == ["tmot", "rpm"], out[0]["order"]
+    for junk in (None, 7, {"a": 1}, "rpm"):
+        assert main._norm_presets([{"order": junk}])[0]["order"] == []
+
+
+def test_an_order_may_name_a_channel_the_slot_does_not_hold():
+    """The order ranks channels; it is not a subset of the keys. A channel
+    unticked and ticked again has to come back where it was, and the two fields
+    are written at different moments -- filtering the order against the keys
+    would delete the entry the instant the channel came off."""
+    _catalog()
+    out = main._norm_presets([{"name": "a", "keys": ["rpm"], "order": ["tmot", "rpm"]}])
+    assert out[0]["order"] == ["tmot", "rpm"], out[0]["order"]
+
+
+def test_a_dead_rli_cannot_enter_an_order_either():
+    main.state.set_catalog(
+        [{"key": "rpm"}, {"key": "vbat"}, {"key": "r72", "dead": True}], ["rpm"])
+    out = main._norm_presets([{"name": "x", "keys": ["rpm"], "order": ["r72", "vbat"]}])
+    assert out[0]["order"] == ["vbat"], out[0]["order"]
+
+
+def test_an_order_survives_state_and_the_snapshot_by_copy():
+    _catalog()
+    out = main._norm_presets([{"name": "a", "keys": ["rpm"], "order": ["vbat", "rpm"]}])
+    main.state.set_presets(out)
+    assert main.state.snapshot()["presets"][0]["order"] == ["vbat", "rpm"]
+    snap = main.state.snapshot()
+    snap["presets"][0]["order"].append("tmot")
+    assert main.state.snapshot()["presets"][0]["order"] == ["vbat", "rpm"], \
+        "the UI edits its own copy"
+
+
+def test_the_free_order_belongs_to_a_set_with_no_slot():
+    _catalog()
+    main.state.set_presets(main._norm_presets([]), "free text", ["tmot", "rpm"])
+    assert main.state.snapshot()["free_order"] == ["tmot", "rpm"]
+    # set_presets without the argument must not wipe it
+    main.state.set_presets(main._norm_presets([]))
+    assert main.state.snapshot()["free_order"] == ["tmot", "rpm"]
+    snap = main.state.snapshot()
+    snap["free_order"].append("vbat")
+    assert main.state.snapshot()["free_order"] == ["tmot", "rpm"]
+
+
+def test_the_endpoint_carries_the_free_order():
+    _catalog()
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "presets.json"
+        old_path = main._presets_path
+        main._presets_path = lambda: path
+        try:
+            r = asyncio.run(main.set_presets({
+                "presets": [{"name": "a", "keys": ["rpm"], "order": ["vbat", "rpm"]}],
+                "free_order": ["tmot", "nope"],
+            }))
+            assert r["presets"][0]["order"] == ["vbat", "rpm"], r["presets"][0]
+            assert r["free_order"] == ["tmot"], r      # filtered like everything else
+            # a post that says nothing about the free order leaves it alone
+            r = asyncio.run(main.set_presets({"presets": [{"name": "b", "keys": ["rpm"]}]}))
+            assert r["free_order"] == ["tmot"], r
+        finally:
+            main._presets_path = old_path
+
+
+def test_the_order_has_no_say_in_what_is_polled():
+    """A layout must never change the poll set: the first preset is still the
+    boot default by its keys alone."""
+    valid = {"rpm", "vbat", "tmot"}
+    presets = [{"name": "D", "keys": ["rpm"], "order": ["tmot", "vbat", "rpm"]},
+               {"name": "", "keys": []}, {"name": "", "keys": []}]
+    assert main._boot_selection(None, presets, valid) == ["rpm"]
 
 
 if __name__ == "__main__":

@@ -295,7 +295,7 @@ mappa* successivo disegna subito.
 
 ## Versioni
 
-- **`VERSION`** è tracciato e si alza a mano: è il numero di rilascio, ora `0.2.0`.
+- **`VERSION`** è tracciato e si alza a mano: è il numero di rilascio, ora `0.2.3`.
 - **`BUILD`** sta accanto, contiene `<versione> <describe> <ramo> <data>`, viene timbrato sia da
   `deploy.sh` sia da `release.sh` e **non viene mai committato**: un file che la scheda avesse
   generato dentro il proprio albero romperebbe la verifica per checksum di `deploy.sh` in entrambe le

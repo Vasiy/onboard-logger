@@ -94,6 +94,17 @@
         <div id="params" class="params" aria-live="polite"></div>
         <p id="paramsEmpty" class="hint" data-i18n="params.viewEmpty" hidden>Nothing picked yet.</p>
 
+        <!-- Arrange mode: press and hold a tile and the grid starts wiggling.
+             The bar is the way out, and the only place the layout can be put
+             back the way params.json has it. -->
+        <div class="arrange-bar" id="arrangeBar" hidden>
+          <span class="arrange-bar__text" data-i18n="arrange.hint">Drag the tiles into place</span>
+          <div class="arrange-bar__acts">
+            <button type="button" id="arrangeReset" class="mini" data-i18n="arrange.reset">Reset order</button>
+            <button type="button" id="arrangeDone" class="btn" data-i18n="arrange.done">Done</button>
+          </div>
+        </div>
+
         <!-- What the preset is for: how to capture it, not what it holds. Read
              mode renders it and hides the block when there is nothing written;
              pick mode is where it gets written. -->

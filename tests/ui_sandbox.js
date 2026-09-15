@@ -51,7 +51,14 @@ function makeSandbox(opts = {}) {
       parentNode: null,
       handlers: {},
       dataset: {},
-      style: {},
+      // a plain bag of properties, as before -- plus the three calls a custom
+      // property needs (`--ord`, the tile order), writing into the same bag so
+      // `style.gridColumn === "2"` assertions elsewhere still hold
+      style: {
+        setProperty(k, v) { this[k] = String(v); },
+        getPropertyValue(k) { return this[k] === undefined ? "" : this[k]; },
+        removeProperty(k) { delete this[k]; },
+      },
       attrs: {},
       value: "",
       _cls: "",

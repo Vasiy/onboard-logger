@@ -300,7 +300,7 @@ un *Voir la cartographie* ultérieur dessine aussitôt.
 ## Versionnage
 
 - **`VERSION`** est suivi par git et incrémenté à la main — le numéro de version, actuellement
-  `0.2.0`.
+  `0.2.3`.
 - **`BUILD`** est à côté, contient `<version> <describe> <branche> <date>`, est estampillé par
   `deploy.sh` comme par `release.sh`, et n'est **jamais commité** : un fichier que la carte aurait
   produit dans sa propre arborescence casserait la vérification par sommes de contrôle de

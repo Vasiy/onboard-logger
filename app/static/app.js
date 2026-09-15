@@ -92,6 +92,7 @@ $$(".tab").forEach((btn) => {
     const name = btn.dataset.tab;
     $$(".tabpanel").forEach((p) => p.classList.toggle("is-active", p.id === "tab-" + name));
     fwLeave();
+    if (name !== "logger" && arrangeOn) void exitArrange(true);
     if (name === "logs") loadLogs();
     if (name === "config") { loadConfig(); loadTime(); loadStorage(); boardLogs.load(); updEnter(); }
     else updLeave();
@@ -281,7 +282,22 @@ function mkParamRow(ch) {
     `<span class="pname">${pname(ch)}</span>` +
     `<canvas class="spark"></canvas>` +
     `<span class="pval">—<span class="unit">${ch.unit || ""}</span></span>`;
-  $("input", row).addEventListener("change", onSelectChange);
+  $("input", row).addEventListener("change", () => onSelectChange(ch.key));
+  // A tile is a <label> around a display:none checkbox, so a tap on it forwards
+  // to that checkbox and switches the channel off -- on the grid that reads as
+  // the tile vanishing for no reason. Picking channels is the pick list's job,
+  // and cancelling the label's activation behaviour is the whole of saying so.
+  // It also swallows the click that ends a drag.
+  row.addEventListener("click", (e) => { if (paramMode === "view") e.preventDefault(); });
+  // The arrange-mode wiggle is staggered so the tiles do not swing in unison.
+  // The phase comes from the row's place in the catalog and never changes:
+  // rewriting animation-delay restarts the animation, which would flicker the
+  // whole grid at every step of a drag.
+  row.style.setProperty("--wig", String(Math.max(0, catalog.indexOf(ch)) % 4));
+  row.addEventListener("pointerdown", (e) => onTileDown(e, row));
+  row.addEventListener("pointermove", (e) => onTileMove(e, row));
+  row.addEventListener("pointerup", (e) => onTileUp(e, row));
+  row.addEventListener("pointercancel", (e) => onTileUp(e, row));
   return row;
 }
 // Which list a channel belongs in. The board sends it; a board that predates the split
@@ -303,6 +319,10 @@ function setUnknownOpen(open) {
 
 function renderParams() {
   const box = $("#params");
+  // The rows are about to be thrown away, so anything holding one has to let go.
+  // Not awaited, and it does not need to be: the order is written into `presets`
+  // synchronously and only the POST that follows it is async.
+  if (arrangeOn) void exitArrange(true);
   box.innerHTML = "";
   const known = catalog.filter((c) => pgroup(c) === "known");
   const check = catalog.filter((c) => pgroup(c) === "check");
@@ -446,7 +466,47 @@ function drawSpark(cv, hist, off, span) {
   ctx.stroke();
 }
 
-async function onSelectChange() {
+// What a derived channel is worked out from. `need` is what the board cannot do
+// without (GearReader returns nothing without rpm and speed); `extra` is polled
+// with it because it is cheap and fixes a real artefact -- neutral is the
+// authority on N, and without the clutch flag an upshift flashes a gear that is
+// not there for about a second.
+//
+// The list is duplicated here rather than read from params.json on purpose:
+// /etc/onboard-logger/params.json wins over the repo copy and outlives a deploy,
+// so a new key there would not reach a board that already has the file, while
+// app.js always ships with the code. tests/test_catalog.py pins it against
+// _derive() in kline/logger.py.
+const DERIVED_DEPS = { gear: { need: ["rpm", "speed"], extra: ["neutral", "clutch"] } };
+
+// A derived channel costs nothing on the wire -- its rli is never requested, the
+// board computes it out of values it already polled -- so it follows its inputs
+// instead of being picked on its own: completing the set switches it on,
+// losing one of them switches it off. Unticking it by hand is still a real
+// choice and leaves the inputs alone.
+function coupleDerived(changed) {
+  const box = new Map(paramRows().map((r) => [r.dataset.key, $("input", r)]));
+  for (const ch of catalog) {
+    const d = DERIVED_DEPS[ch.derived];
+    const me = box.get(ch.key);
+    if (!d || !me) continue;
+    const need = d.need.filter((k) => box.has(k));
+    if (!need.length) continue;                       // nothing to couple to
+    const have = need.every((k) => box.get(k).checked);
+    if (changed === ch.key) {
+      if (me.checked) {
+        for (const k of [...need, ...d.extra]) if (box.has(k)) box.get(k).checked = true;
+      }
+    } else if (need.includes(changed) && have) {
+      me.checked = true;
+    } else if (!have) {
+      me.checked = false;
+    }
+  }
+}
+
+async function onSelectChange(changed) {
+  coupleDerived(changed);
   const rows = paramRows();
   selectedKeys = new Set(rows.filter((r) => $("input", r).checked).map((r) => r.dataset.key));
   rows.forEach((r) => r.classList.toggle("off", !$("input", r).checked));
@@ -482,12 +542,16 @@ let paramMode = localStorage.getItem("paramMode") || "view";
 
 function applyParamMode() {
   const box = $("#params");
+  // arranging is a read-mode job: the pick list is a list of checkboxes
+  if (paramMode !== "view" && arrangeOn) void exitArrange(true);
   box.classList.toggle("params--view", paramMode === "view");
   $$("#paramMode button").forEach((b) => b.classList.toggle("on", b.dataset.pm === paramMode));
   const empty = paramMode === "view" && catalog.length && !selectedKeys.size;
   $("#paramsEmpty").hidden = !empty;
   renderPresets();
   renderPresetCost();       // also when there are no presets yet to render
+  applyTileOrder();
+  setArrangeUi();
   drawSparks();
 }
 $$("#paramMode button").forEach((b) =>
@@ -513,6 +577,7 @@ let lastIdx = -1;
 let presetsPending = false;      // a local write is in flight — ignore the push
 const NOTE_MAX = 4096;           // the board trims to the same figure
 let freeNote = "";               // the note for a set that matches no preset
+let freeOrder = [];              // and the tile layout of that same set
 
 const presetName = (p, i) => p.name || "preset" + (i + 1);
 
@@ -540,7 +605,9 @@ const sameSet = (set, keys) => set.size === keys.length && keys.every((k) => set
 const PAPER_REQ_MS = 13.5;      // 6-byte request + 8-byte reply at 10400 8N1
 
 function reqCount(keys) {
-  const rli = new Map(catalog.map((c) => [c.key, c.rli]));
+  // a derived channel is worked out from channels that are already polled, so its
+  // rli never goes on the wire and it must not price like a request
+  const rli = new Map(catalog.filter((c) => !c.derived).map((c) => [c.key, c.rli]));
   return new Set(keys.map((k) => rli.get(k)).filter((r) => r != null)).size;
 }
 
@@ -672,6 +739,9 @@ async function onPresetClick(i) {
 }
 
 async function applyPreset(i) {
+  // the arrangement belongs to the preset it was made on, so it is stored
+  // before the lit slot changes underneath it
+  if (arrangeOn) await exitArrange(true);
   const want = new Set(presets[i].keys);
   paramRows().forEach((r) => ($("input", r).checked = want.has(r.dataset.key)));
   // a preset may reach into the folded unidentified-rli list; leaving it folded
@@ -690,15 +760,17 @@ async function savePresets() {
   try {
     const r = await api("/api/presets", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ presets, free_note: freeNote }),
+      body: JSON.stringify({ presets, free_note: freeNote, free_order: freeOrder }),
     });
     if (r && r.presets) { presets = r.presets; presetSig = JSON.stringify(r.presets); }
     if (r && typeof r.free_note === "string") freeNote = r.free_note;
+    if (r && Array.isArray(r.free_order)) freeOrder = r.free_order;
   } catch (e) {
     toast(t("preset.saveFail"), "err");
   } finally {
     presetsPending = false;
     renderPresets();
+    applyTileOrder();
   }
 }
 
@@ -718,6 +790,294 @@ $("#presetNoteEdit").addEventListener("input", (e) => {
 });
 // blur, not per keystroke — the same rule the preset name follows
 $("#presetNoteEdit").addEventListener("change", () => savePresets());
+
+// ---------- tile order ----------
+// Read mode lays the picked channels out as tiles, and which tile sits where is
+// the rider's business: press and hold one, the grid starts wiggling the way a
+// phone home screen does, and the tiles are dragged into whatever order suits
+// the bike.
+//
+// The layout belongs to the *preset*, beside its name, keys and note, and lives
+// on the board -- how the instruments are arranged is a property of the bike
+// being watched, not of the phone that connected, so it is not a third
+// localStorage preference. It is deliberately not part of the *selection*
+// either: set_selected() rolls the decoded CSV to a new file, so a drag routed
+// through /api/selected would shred a ride into one fragment per move.
+const HOLD_MS = 350;        // press and hold this long before the grid wiggles
+const MOVE_TOL = 8;         // a finger that travels first meant to scroll
+const ORD_PARKED = 999;     // an unpicked row: `order` defaults to 0, i.e. the front
+// A wrapped grid is read row by row, so a drop belongs to the row under the
+// finger far more often than to whatever centre is nearest as the crow flies --
+// past the end of a short last row, plain distance picks the tile above.
+const ROW_BIAS = 3;
+
+let arrangeOn = false;      // the grid is wiggling
+let arrangeDrag = null;     // the tile following a finger right now
+let tileOrderLive = null;   // the dense working list while arranging
+let tileOrderDirty = false; // something actually moved, so there is a change to store
+let holdTimer = null;
+let hold = null;            // a press being timed, before it becomes a drag
+
+// Stored order first, keeping only what is on screen, then whatever else is
+// selected, in catalog order. Self-healing in both directions and with nothing
+// to keep in sync: a retired or unticked key drops out, and a channel ticked
+// after the arrangement lands at the end rather than jumping to the front.
+function resolveTileOrder(stored, selected, cat) {
+  const want = new Set(selected || []);
+  const out = [], seen = new Set();
+  for (const k of stored || []) {
+    if (want.has(k) && !seen.has(k)) { seen.add(k); out.push(k); }
+  }
+  for (const c of cat || []) {
+    if (want.has(c.key) && !seen.has(c.key)) { seen.add(c.key); out.push(c.key); }
+  }
+  return out;
+}
+
+// what a drop does on screen
+function moveItem(arr, from, to) {
+  const out = [...arr];
+  if (from < 0 || from >= out.length) return out;
+  const [k] = out.splice(from, 1);
+  out.splice(Math.max(0, Math.min(out.length, to)), 0, k);
+  return out;
+}
+
+// Which tile the finger is over. Plain records, never DOM, so the geometry can
+// be pinned by numbers without a browser.
+function dropIndex(rects, x, y, from) {
+  let best = from, bd = Infinity;
+  (rects || []).forEach((r, i) => {
+    const dx = (r.left + r.right) / 2 - x;
+    const dy = ((r.top + r.bottom) / 2 - y) * ROW_BIAS;
+    const d = dx * dx + dy * dy;
+    if (d < bd) { bd = d; best = i; }
+  });
+  return best;
+}
+
+// What gets written back. The grid can only show the *selected* keys, so a drag
+// produces a dense list of those; storing that list as it stands would delete
+// every unticked channel from the order, and ticking one back on would drop it
+// at the end. So the dense result is laid back over the stored list and the
+// keys that are not on screen keep their own anchors.
+function mergeTileOrder(stored, dense) {
+  const list = dense || [];
+  const vis = new Set(list);
+  const out = [];
+  let i = 0;
+  for (const k of stored || []) {
+    if (vis.has(k)) { if (i < list.length) out.push(list[i++]); }
+    else out.push(k);
+  }
+  while (i < list.length) out.push(list[i++]);
+  return out;
+}
+
+// Whose layout is on screen follows the rule that already governs the name, the
+// ticks and the note (noteTarget): the slot open for editing, else the preset
+// the live selection equals, else the free one. Arranging is read-mode only, so
+// the first branch never fires here.
+function storedTileOrder() {
+  const i = noteTarget();
+  if (i >= 0 && presets) return presets[i].order || [];
+  if (freeOrder.length) return freeOrder;
+  // A hand-picked set has no slot of its own. Until it has a layout, show the
+  // one it departed from -- `lastIdx` already marks that preset for the grey
+  // "was here" button, and without this one extra tick would look like the
+  // arrangement had been thrown away.
+  if (lastIdx >= 0 && presets) return presets[lastIdx].order || [];
+  return [];
+}
+
+function setStoredTileOrder(list) {
+  const i = noteTarget();
+  if (i >= 0 && presets) presets[i].order = list; else freeOrder = list;
+}
+
+function paintTileOrder(keys) {
+  const at = new Map((keys || []).map((k, i) => [k, i]));
+  // every row is numbered, none left at the CSS default -- an unnumbered tile
+  // would sort to the *front* of the grid, ahead of the whole arrangement
+  paramRows().forEach((r) => {
+    const i = at.get(r.dataset.key);
+    r.style.setProperty("--ord", String(i === undefined ? ORD_PARKED : i));
+  });
+}
+
+function applyTileOrder() {
+  if (arrangeDrag) return;     // a drag owns the layout until it ends
+  if (arrangeOn) {
+    // The selection can still change under a live arrangement, so the working
+    // list is re-resolved against it rather than left to go stale: a channel
+    // that came off drops out, one that came on lands at the end, and what the
+    // rider has already moved keeps its place. Idempotent, so the 0.2 s push
+    // costs nothing.
+    tileOrderLive = resolveTileOrder(tileOrderLive || storedTileOrder(),
+                                     [...selectedKeys], catalog);
+    paintTileOrder(tileOrderLive);
+    return;
+  }
+  paintTileOrder(resolveTileOrder(storedTileOrder(), [...selectedKeys], catalog));
+}
+
+function setArrangeUi() {
+  const box = $("#params"), bar = $("#arrangeBar");
+  if (box) box.classList.toggle("params--arrange", arrangeOn && paramMode === "view");
+  if (bar) bar.hidden = !arrangeOn;
+}
+
+function enterArrange() {
+  if (arrangeOn || paramMode !== "view") return;
+  arrangeOn = true;
+  tileOrderDirty = false;
+  tileOrderLive = resolveTileOrder(storedTileOrder(), [...selectedKeys], catalog);
+  setArrangeUi();
+  applyTileOrder();
+  try { if (navigator.vibrate) navigator.vibrate(10); } catch (e) {}
+}
+
+function reorderTiles(key, to) {
+  if (!tileOrderLive) return;
+  const from = tileOrderLive.indexOf(key);
+  if (from < 0 || from === to) return;
+  tileOrderLive = moveItem(tileOrderLive, from, to);
+  tileOrderDirty = true;
+  paintTileOrder(tileOrderLive);      // not applyTileOrder: the drag is the author
+}
+
+async function exitArrange(save) {
+  const live = tileOrderLive, dirty = tileOrderDirty;
+  arrangeOn = false;
+  arrangeDrag = null;
+  hold = null;
+  clearTimeout(holdTimer);
+  holdTimer = null;
+  tileOrderLive = null;
+  tileOrderDirty = false;
+  setArrangeUi();
+  if (save && dirty && live) {
+    setStoredTileOrder(mergeTileOrder(storedTileOrder(), live));
+    applyTileOrder();
+    await savePresets();               // one write per session, not one per drop
+  } else {
+    applyTileOrder();
+  }
+}
+
+async function resetTileOrder() {
+  setStoredTileOrder([]);
+  // a set with no slot also forgets which preset it came from, or the fallback
+  // in storedTileOrder() would hand the old layout straight back
+  if (noteTarget() < 0) lastIdx = -1;
+  tileOrderLive = resolveTileOrder([], [...selectedKeys], catalog);
+  tileOrderDirty = false;
+  applyTileOrder();
+  await savePresets();
+  toast(t("arrange.wasReset"), "ok");
+}
+
+// ---- the gesture. Pointer events throughout: HTML5 drag-and-drop is inert in
+// Safari on iOS, and this UI is phone-first.
+
+// The tiles in the order they are *seen*, which is the order the working list
+// holds -- paramRows() is DOM order and the grid is sorted by `--ord`.
+function measureTiles(d) {
+  const rows = new Map(paramRows().map((r) => [r.dataset.key, r]));
+  d.rows = (tileOrderLive || []).map((k) => rows.get(k)).filter(Boolean);
+  d.rects = d.rows.map((r) => r.getBoundingClientRect());
+}
+
+function startTileDrag(e, row) {
+  if (!tileOrderLive || arrangeDrag) return;
+  const from = tileOrderLive.indexOf(row.dataset.key);
+  if (from < 0) return;
+  const r = row.getBoundingClientRect();
+  arrangeDrag = {
+    row, key: row.dataset.key, id: e.pointerId, from,
+    gx: e.clientX - r.left, gy: e.clientY - r.top,   // the grip inside the tile
+    bx: r.left, by: r.top,                           // its untransformed corner
+    x: e.clientX, y: e.clientY, raf: 0,
+  };
+  measureTiles(arrangeDrag);
+  row.classList.add("is-drag");
+  try { row.setPointerCapture(e.pointerId); } catch (err) {}
+}
+
+function onTileDown(e, row) {
+  if (paramMode !== "view" || row.classList.contains("off")) return;
+  if (arrangeOn) { startTileDrag(e, row); return; }
+  // Nothing is captured and nothing is prevented until the timer fires:
+  // touch-action and pointer capture are both latched at the start of a
+  // gesture, so grabbing either early would cost the tile list its scroll.
+  hold = { x: e.clientX, y: e.clientY };
+  clearTimeout(holdTimer);
+  holdTimer = setTimeout(() => {
+    holdTimer = null;
+    if (!hold) return;
+    hold = null;
+    enterArrange();
+  }, HOLD_MS);
+}
+
+function onTileMove(e, row) {
+  if (hold) {
+    if (Math.abs(e.clientX - hold.x) > MOVE_TOL || Math.abs(e.clientY - hold.y) > MOVE_TOL) {
+      clearTimeout(holdTimer); holdTimer = null; hold = null;   // they meant to scroll
+    }
+    return;
+  }
+  const d = arrangeDrag;
+  if (!d || d.row !== row) return;
+  e.preventDefault();
+  d.x = e.clientX; d.y = e.clientY;
+  row.style.transform = `translate(${d.x - d.gx - d.bx}px, ${d.y - d.gy - d.by}px)`;
+  if (d.raf) return;
+  d.raf = requestAnimationFrame(() => {
+    d.raf = 0;
+    if (arrangeDrag !== d) return;
+    const to = dropIndex(d.rects, d.x, d.y, d.from);
+    if (to === d.from) return;
+    arrangeDrag = null;                 // let the repaint through
+    reorderTiles(d.key, to);
+    arrangeDrag = d;
+    d.from = to;
+    // the tile now sits in a different slot: re-base the transform on it, or it
+    // would jump out from under the finger
+    row.style.transform = "";
+    measureTiles(d);
+    const r = row.getBoundingClientRect();
+    d.bx = r.left; d.by = r.top;
+    row.style.transform = `translate(${d.x - d.gx - d.bx}px, ${d.y - d.gy - d.by}px)`;
+  });
+}
+
+// A cancelled pointer is treated as a drop rather than a revert: what is on the
+// grid is what the rider last saw, and nothing has gone to the board yet anyway.
+function onTileUp(e, row) {
+  clearTimeout(holdTimer); holdTimer = null; hold = null;
+  const d = arrangeDrag;
+  if (!d || d.row !== row) return;
+  arrangeDrag = null;
+  if (d.raf) cancelAnimationFrame(d.raf);
+  row.style.transform = "";
+  row.classList.remove("is-drag");
+  try { row.releasePointerCapture(d.id); } catch (err) {}
+  applyTileOrder();
+}
+
+$("#arrangeDone").addEventListener("click", () => exitArrange(true));
+$("#arrangeReset").addEventListener("click", () => resetTileOrder());
+document.addEventListener("keydown", (e) => {
+  if (arrangeOn && e.key === "Escape") void exitArrange(true);
+});
+// a press on anything that is not a tile or the bar itself is "done"
+document.addEventListener("pointerdown", (e) => {
+  if (!arrangeOn) return;
+  const el = e.target;
+  if (el && el.closest && (el.closest(".prow") || el.closest("#arrangeBar"))) return;
+  void exitArrange(true);
+}, true);
 
 // ---------- appearance ----------
 // Device-local, not board config: the same board is read in sunlight and at night.
@@ -947,15 +1307,22 @@ function applySnapshot(s) {
   }
   // the board is the authority on the presets, except while this browser is the
   // one changing them — a half-typed name is a change that has not gone out yet
-  if (s.presets && !presetsPending && document.activeElement !== $("#presetName")
+  // ...and except while the tiles are being arranged: the board's copy of the
+  // order would land on top of the one under the rider's finger
+  if (s.presets && !presetsPending && !arrangeOn
+      && document.activeElement !== $("#presetName")
       && document.activeElement !== $("#presetNoteEdit")) {
     const sig = JSON.stringify(s.presets);
     if (typeof s.free_note === "string") freeNote = s.free_note;
+    if (Array.isArray(s.free_order)) freeOrder = s.free_order;
     if (sig !== presetSig) { presets = s.presets; presetSig = sig; renderPresets(); }
+    applyTileOrder();
   }
   updateValues(s.values);
   pushSpark(s.values);
-  if (isLoggerActive()) drawSparks();
+  // a drag owns the frame budget: resizing a canvas per tile at 5 Hz is not what
+  // a phone should be doing while one of them is following a finger
+  if (isLoggerActive() && !arrangeDrag) drawSparks();
   if (testingActive()) updateTestingButtons();
 }
 

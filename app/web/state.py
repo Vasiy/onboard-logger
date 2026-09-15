@@ -49,11 +49,13 @@ class State:
         self.selected: list[str] = []  # channel keys the UI shows live
         # three named channel sets the Logger tab switches between; which one is
         # "active" is never stored — the UI derives it by comparing sets
-        self.presets: list[dict] = [{"name": "", "keys": [], "note": ""}
+        self.presets: list[dict] = [{"name": "", "keys": [], "note": "", "order": []}
                                     for _ in range(3)]
-        # the note for a hand-picked set: which preset is "active" is derived
-        # from the live selection, so a set matching none of them has no slot
+        # the note and the tile order for a hand-picked set: which preset is
+        # "active" is derived from the live selection, so a set matching none of
+        # them has no slot of its own to keep either in
         self.free_note: str = ""
+        self.free_order: list[str] = []
         self.catalog: list[dict] = []  # [{key,name,unit}, ...]
         # rli-scan (bus sweep) status
         self.scan_on = False
@@ -221,13 +223,17 @@ class State:
         with self._lock:
             self.selected = list(keys)
 
-    def set_presets(self, presets: list[dict], free_note: str | None = None) -> None:
+    def set_presets(self, presets: list[dict], free_note: str | None = None,
+                    free_order: list[str] | None = None) -> None:
         with self._lock:
             self.presets = [{"name": str(p.get("name", "")),
                              "keys": list(p.get("keys", [])),
-                             "note": str(p.get("note", ""))} for p in presets]
+                             "note": str(p.get("note", "")),
+                             "order": list(p.get("order", []))} for p in presets]
             if free_note is not None:
                 self.free_note = str(free_note)
+            if free_order is not None:
+                self.free_order = list(free_order)
 
     # -- reader ------------------------------------------------------------
     def snapshot(self) -> dict:
@@ -266,9 +272,11 @@ class State:
                 "selected": list(self.selected),
                 # copied, not referenced: the UI edits what it is handed
                 "presets": [{"name": p["name"], "keys": list(p["keys"]),
-                             "note": p.get("note", "")}
+                             "note": p.get("note", ""),
+                             "order": list(p.get("order", []))}
                             for p in self.presets],
                 "free_note": self.free_note,
+                "free_order": list(self.free_order),
                 "catalog": list(self.catalog),
                 "scan_on": self.scan_on,
                 "scan_sweeps": self.scan_sweeps,

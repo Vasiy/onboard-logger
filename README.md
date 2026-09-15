@@ -38,6 +38,15 @@ parameters and records to `/root/k-line/`.
     be proven on the bike, then the unidentified rli, collapsed. A green banner shows the connected ECU identity. A
     **read / pick** switch flips the list between big tiles of the picked channels (what you read
     from a handlebar mount) and the checkbox list; the choice is remembered per device.
+    Press and hold a tile and the grid starts wiggling: the tiles then drag into whatever order
+    suits the bike — finger or cursor — with *Done* and *Reset order* in a bar underneath. That
+    layout belongs to the **preset** and lives on the board beside its name, keys and note, so
+    every phone that joins sees the same arrangement. A tap on a tile does not switch the channel
+    off; picking channels is the pick list's job.
+    Above the list sit three named **presets** that swap the whole selection in one tap, each with
+    a markdown note saying how to capture it (cold engine, hold 3000 rpm) and its own tile layout.
+    Which one is lit is derived from the live selection and never stored, so a hand-made tick puts
+    it out by itself.
   - *Firmware* — read/write the ECU image via [`denandz/5am_util`](https://github.com/denandz/5am_util);
     the Read block shows the live ECU description (saved into a labelled `.txt` on read);
     upload/download/diff/delete `.bin` (+`.txt`), exact-size (327680 B) write gate.

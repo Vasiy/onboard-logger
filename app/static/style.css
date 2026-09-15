@@ -822,7 +822,15 @@ body.is-stale .ecu-banner { filter: grayscale(1); }
 .params--view .prow {
   flex-direction: column; align-items: stretch; gap: 2px; margin: 0; padding: 10px 12px;
   border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2);
+  /* The rider's own layout. A custom property rather than a bare `order`,
+     because #params is a flex column in pick mode as well — an inline order
+     would sort those rows around their group headings. Read mode is the only
+     place the rule exists, so nothing has to be cleared on a mode switch. */
+  order: var(--ord, 0);
 }
+/* A long press must not pop the iOS selection magnifier over the tile, and that
+   fires from the press itself — before arrange mode is on. */
+.params--view .prow { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .params--view .prow:hover { background: var(--surface-2); }
 .params--view .prow input[type=checkbox] { display: none; }
 .params--view .pname {
@@ -833,6 +841,42 @@ body.is-stale .ecu-banner { filter: grayscale(1); }
 .params--view .pval .unit { font-size: 13px; }
 .params--view .pstatus { font-size: 20px; }
 .params--view .spark { order: 3; width: 100%; height: 26px; margin-top: 4px; }
+
+/* ---------- arrange mode ---------- */
+/* Press and hold a tile and the grid wiggles the way a phone home screen does.
+   The phase comes from --wig, set once per row from its place in the catalog:
+   rewriting animation-delay would restart the animation and flicker the whole
+   grid at every step of a drag. */
+@keyframes tile-wiggle {
+  0%, 100% { transform: rotate(-.55deg); }
+  50%      { transform: rotate(.55deg); }
+}
+.params--arrange .prow {
+  animation: tile-wiggle .28s ease-in-out infinite;
+  animation-delay: calc(var(--wig, 0) * -70ms);
+  touch-action: none;                      /* the finger is dragging, not scrolling */
+  cursor: grab;
+}
+/* Not cosmetic: a running animation on `transform` beats the inline transform
+   that follows the finger, so without this the lifted tile would not move. */
+.params--arrange .prow.is-drag {
+  animation: none; cursor: grabbing; position: relative; z-index: 5;
+  box-shadow: var(--shadow); border-color: var(--accent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .params--arrange .prow { animation: none; outline: 1px dashed var(--accent); }
+}
+.arrange-bar {
+  position: sticky; z-index: 15; bottom: calc(10px + env(safe-area-inset-bottom));
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin: var(--gap-block) 0; padding: 10px 12px;
+  background: var(--surface); border: 1px solid var(--accent); border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.arrange-bar[hidden] { display: none; }   /* [hidden] loses to display:flex without this */
+.arrange-bar__text { flex: 1 1 140px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.arrange-bar__acts { display: flex; gap: 8px; align-items: center; }
+.arrange-bar__acts .btn { width: auto; min-height: 40px; }
 
 /* ---------- field-sized touch targets ---------- */
 /* Scan markers are pressed while standing at the bike, actuator buttons with the
