@@ -228,11 +228,14 @@ class UpdateManager:
         VERSION is the tracked release number (hand-bumped). BUILD is stamped
         beside it by deploy.sh / release.sh — the same number plus the commit and
         the date — and is never committed: a file the board generated inside DEST
-        would break deploy.sh's checksum verification in both directions. So an
-        installed tree normally answers with BUILD, and a bare source tree with
-        the plain release number.
+        would break deploy.sh's checksum verification in both directions. This
+        endpoint feeds Config → System's `#updVersion`, and a rider reads that as
+        "what firmware am I on" — not a debugging aid, so it names the release
+        number alone. The commit, branch and stamp date that BUILD also carries
+        stay out of it; they exist for `deploy.sh`'s own checksum story and the
+        terminal, not for the phone.
         """
-        text = _tree_version(self.dest)
+        text = _release_version(self.dest)
         st = _read_state(self.etc_dir)
         return {
             "version": text,
@@ -653,7 +656,9 @@ def _sha256(path: Path) -> str:
 
 
 def _tree_version(root: Path) -> str:
-    """BUILD (number + commit + date) if the tree was stamped, else VERSION."""
+    """BUILD (number + commit + branch + date) if the tree was stamped, else
+    VERSION. Full detail, for the rollback record and the terminal -- never
+    handed to the UI as-is; see `_release_version()` for that."""
     for name in ("BUILD", "VERSION"):
         try:
             text = (root / name).read_text().strip()
@@ -662,3 +667,11 @@ def _tree_version(root: Path) -> str:
         if text:
             return text
     return ""
+
+
+def _release_version(root: Path) -> str:
+    """Just the release number -- BUILD's first field, or the whole of VERSION.
+    What Config → System shows: a rider reads it as "what firmware am I on",
+    and a commit hash on screen answers a question nobody there is asking."""
+    full = _tree_version(root)
+    return full.split()[0] if full else ""

@@ -4,6 +4,7 @@ Run directly:  python tests/test_kline.py   (or: pytest)
 """
 
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -375,6 +376,77 @@ def test_slow_init():
     t = KLineTransport("/dev/null")
     t.ser = F()
     assert t.slow_init(bit_ms=1) == (0x8F, 0xEF)
+
+
+class _CycleSession:
+    """One poll cycle's worth of session, scripted per rli, then stop the loop."""
+
+    def __init__(self, worker, answers, bus_s=0.02):
+        self.worker = worker
+        self.answers = answers          # rli -> "ok" / "to"
+        self.bus_s = bus_s
+        self.asked = []
+        self.tester = 0
+
+    def read_local(self, rli, with_addr=True, timeout=0.15):
+        self.asked.append(rli)
+        time.sleep(self.bus_s)
+        st = self.answers.get(rli, "to")
+        return {"rli": rli, "with_addr": with_addr, "status": st,
+                "data": "610000" if st == "ok" else "", "tx": "", "rx": ""}
+
+    def tester_present(self):
+        self.tester += 1
+
+    def keepalive_if_idle(self, idle_s):
+        self.worker._stop_event.set()   # one cycle is all the tests need
+
+
+def _cycle(answers, selected, bus_s=0.02, fixed_sleep=0.0):
+    """Run exactly one poll cycle against a scripted session and hand back state."""
+    import tempfile
+
+    from app.kline.logger import KLineWorker
+    from app.web.led import Led
+    from app.web.state import State
+
+    params = str(Path(__file__).resolve().parent.parent / "config" / "params.json")
+    with tempfile.TemporaryDirectory() as tmp:
+        w = KLineWorker(port="/dev/null", params_path=params, log_dir=tmp,
+                        state=State(), led=Led(),
+                        log_decoded_default=False, log_raw_default=False)
+        w.set_selected(list(selected))
+        w._dec_restart = False          # set_selected arms it; nothing is open here
+        ses = _CycleSession(w, answers, bus_s)
+        if fixed_sleep:
+            # stand in for the cycle's own work -- derive, CSV write, reconcile
+            real = w._reconcile_logging
+            w._reconcile_logging = lambda: (time.sleep(fixed_sleep), real())[1]
+        w._poll_loop_inner(ses)
+        return w.state, ses
+
+
+def test_a_cycle_nobody_answered_prices_nothing():
+    """A dead bus must not become the price of a live selection.
+
+    Every read is a full timeout there, and the cycle also runs TesterPresent --
+    a link check, not a request. Charging either to the estimate would make a
+    parked bike quote a poll rate no ride will ever see.
+    """
+    st, ses = _cycle({}, ["rpm", "coolant_t"])
+    assert ses.tester == 1, "a silent bus is verified with TesterPresent"
+    assert st.poll_req_ms == 0.0 and st.poll_fixed_ms == 0.0, \
+        (st.poll_req_ms, st.poll_fixed_ms)
+
+
+def test_the_two_halves_of_a_cycle_are_measured_apart():
+    """Wire time divides by the request count; the rest of the cycle does not."""
+    rpm = next(p for p in ParamMap.load(
+        Path(__file__).resolve().parent.parent / "config" / "params.json").params
+        if p.key == "rpm")
+    st, ses = _cycle({rpm.rli: "ok"}, ["rpm"], bus_s=0.03, fixed_sleep=0.05)
+    assert 25 < st.poll_req_ms < 45, st.poll_req_ms       # ~30 ms of wire, one request
+    assert 40 < st.poll_fixed_ms < 90, st.poll_fixed_ms   # ~50 ms of cycle, charged once
 
 
 def _main():

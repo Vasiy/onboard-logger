@@ -35,6 +35,7 @@
   "hostname": "nano-loger",
   "kline": {
     "port": "/dev/kline",
+    "iface": "usb",
     "echo": true,
     "baud": "auto",
     "init": "fast"
@@ -49,6 +50,15 @@
     "cpu": {
       "governor": "",
       "max_khz": 0
+    },
+    "power_save": {
+      "enabled": false,
+      "idle_min": 15,
+      "off_min": 15
+    },
+    "rtc": {
+      "source": "web",
+      "device": ""
     }
   },
   "gear": {
@@ -70,6 +80,24 @@
     "keep": 10,
     "kmsg": true,
     "zip_after": false
+  },
+  "fan": {
+    "enabled": false,
+    "log": false,
+    "fan_type": 2,
+    "pwm_chip": "/sys/class/pwm/pwmchip0",
+    "pwm_channel": 0,
+    "temp_path": "/sys/class/thermal/thermal_zone0/temp",
+    "period_ns": 8000000,
+    "polarity": "normal",
+    "target_temps_c": [65000, 60000, 55000, 50000],
+    "duty_cycles_ns": [8000000, 6000000, 4000000, 2000000],
+    "default_duty_ns": 0,
+    "tach_gpio": null,
+    "tach_gpio_root": "/sys/class/gpio",
+    "tach_pulses_per_rev": 2,
+    "min_duty_pct": null,
+    "max_rpm": null
   },
   "storage": {
     "dest": "internal",

@@ -43,7 +43,7 @@ const SNAP = (over = {}) => ({
   scan_on: false, scan_total: 0, scan_pos: 0, scan_alive: 0, scan_remaining: -1, scan_sweeps: 0,
   wifi_mode: "ap", wifi_link: {}, ap_channel: 6,
   test_mode: false, test_mode_detail: "", act_key: "", act_lid: 0, act_until: 0,
-  poll_req_ms: 0, poll_min_ms: 150,
+  poll_req_ms: 0, poll_fixed_ms: 0, poll_min_ms: 150,
   values: {}, values_ts: 0, catalog: CAT, selected: ["rpm"], presets: PRESETS(), ...over,
 });
 
@@ -240,11 +240,29 @@ test("the cost of a set is priced from the measured per-request time", async () 
   assert(cost.textContent === "≈ 4.2 Hz · 4 requests", "got " + cost.textContent);
 });
 
+test("a cycle's fixed cost is charged once, not once per request", async () => {
+  const sb = await sandbox("edit");
+  // The defect this pins: pricing a set as n x per ignores the work a cycle does
+  // whatever the selection -- derive, CSV write, log reconcile, keepalive -- so
+  // the estimate was out by that whole amount, and out by more the bigger the set.
+  sb.applySnapshot(SNAP({ poll_req_ms: 60, poll_fixed_ms: 200 }));
+  await tap(sb, 0);                              // rpm + tmot -> two distinct rli
+  const cost = sb.document.querySelector("#presetCost");
+  // 200 + 2 x 60 = 320 ms -> 3.1 Hz.  Linear would have said 6.7.
+  assert(cost.textContent === "\u2248 3.1 Hz \u00b7 2 requests", "got " + cost.textContent);
+  await tick(sb, "lambda", true);
+  await tick(sb, "r36", true);
+  // 200 + 4 x 60 = 440 ms -> 2.3 Hz.  Linear would have said 4.2.
+  assert(cost.textContent === "\u2248 2.3 Hz \u00b7 4 requests", "got " + cost.textContent);
+});
+
 test("with no live bus the price falls back to the wire arithmetic", async () => {
   const sb = await sandbox("edit");
   // poll_req_ms 0: nothing measured. The floor is lifted here so the paper number
   // is what shows, instead of being clamped away by it.
-  sb.applySnapshot(SNAP({ poll_min_ms: 10 }));
+  // poll_fixed_ms is deliberately non-zero here: with nothing measured on the
+  // wire there is no fixed half to believe either, and it must not leak in.
+  sb.applySnapshot(SNAP({ poll_min_ms: 10, poll_fixed_ms: 200 }));
   await tap(sb, 0);
   // 2 requests x 13.5 ms of wire at 10400 8N1 = 27 ms -> 37 Hz
   assert(sb.document.querySelector("#presetCost").textContent === "≈ 37.0 Hz · 2 requests",

@@ -146,6 +146,22 @@ def test_the_ui_couples_gear_to_what_the_board_derives_it_from():
         "the derived channel must not carry a real rli -- it is never requested"
 
 
+def test_an_rli_is_asked_for_the_same_way_by_every_channel_that_shares_it():
+    """The UI prices a selection at one request per distinct rli; the worker
+    dedupes on ``(rli, with_addr)``, and ``with_addr`` is ``fmt != 0``
+    (``app/kline/params.py``). Two channels on one rli with different ``fmt``
+    would therefore cost two requests and be priced as one. The catalog does not
+    carry ``with_addr``, so rather than plumb it through for a case that does not
+    exist, the case is kept from existing."""
+    fmts = {}
+    for p in PARAMS["params"]:
+        if p.get("dead") or p.get("derived"):
+            continue
+        fmts.setdefault(p["rli"], set()).add(int(p.get("fmt", 0)))
+    mixed = {hex(rli): sorted(f) for rli, f in fmts.items() if len(f) > 1}
+    assert not mixed, f"these rli are requested two ways, so the cost estimate lies: {mixed}"
+
+
 def _main():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

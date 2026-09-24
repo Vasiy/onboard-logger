@@ -8,6 +8,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from . import rtc as rtc_mod
+
 # One automatic sync per power-up: /run is tmpfs, so the marker disappears on a
 # reboot but survives a service restart or a deploy — which is exactly the
 # power-cycle boundary the feature is about.
@@ -42,9 +44,12 @@ def shutdown() -> dict:
 
 
 # -- clock -----------------------------------------------------------------
-# The board has an RTC but no internet on the bike, so timesyncd can be running
-# and still be wrong. The Config tab can push the browser's clock instead — log
-# file names and CSV timestamps come from the local clock.
+# Every board answers with *an* RTC and most of them have no battery behind it
+# (this NEO3's rk808-rtc comes up in 2016), and there is no internet on the bike,
+# so timesyncd can be running and still be wrong. The Config tab pushes the
+# browser's clock instead; with a battery-backed module wired on, app/web/rtc.py
+# finds it by name and the board reads that at boot. Log file names and CSV
+# timestamps all come from the local clock.
 def _out(cmd: list[str]) -> str:
     if shutil.which(cmd[0]) is None:
         return ""
@@ -75,8 +80,33 @@ def time_status() -> dict:
     }
 
 
-def set_time(epoch: float, tz: str = "") -> dict:
+def rtc_to_system(dev: str) -> tuple[bool, str]:
+    """Take the system clock from a battery-backed module: hwclock -s.
+
+    Always with -f. /dev/rtc points at whichever clock the kernel registered
+    first, which on this board is the PMIC's batteryless one -- a bare hwclock
+    reads 2016 and looks like it worked.
+    """
+    node = rtc_mod.node(dev)
+    if not node:
+        return False, "no rtc device"
+    return _run_err(["hwclock", "-s", "-f", node])
+
+
+def system_to_rtc(dev: str) -> tuple[bool, str]:
+    """Push the system clock into the module: hwclock -w. Same -f rule."""
+    node = rtc_mod.node(dev)
+    if not node:
+        return False, "no rtc device"
+    return _run_err(["hwclock", "-w", "-f", node])
+
+
+def set_time(epoch: float, tz: str = "", rtc_dev: str = "") -> dict:
     """Set the clock from a client-supplied epoch (and optionally its timezone).
+
+    With ``rtc_dev`` the new time is written into that module as well: on a board
+    running from a hardware RTC, the sync button's job is to correct the module,
+    not just the running clock it will be overwritten by at the next boot.
 
     Always applies (within a sanity range): the button is an explicit request and
     the browser is the only trustworthy clock on the bike. NTPSynchronized is no
@@ -115,6 +145,17 @@ def set_time(epoch: float, tz: str = "") -> dict:
         _run(["timedatectl", "set-ntp", "true"])
     if ok:
         applied.append(stamp)
+        if rtc_dev:
+            wrote, werr = system_to_rtc(rtc_dev)
+            if wrote:
+                applied.append(f"rtc {rtc_dev}")
+            else:
+                # The running clock is right either way, so this is not a failed
+                # set -- but on a board running off the module the write is the
+                # half that lasts, and a green banner over a module that was not
+                # written is the worst of the two answers.
+                ok = False
+                err = werr or err
     return {"ok": ok, "applied": applied, "error": "" if ok else "err.set_time",
             "detail": err, **time_status()}
 
@@ -161,7 +202,8 @@ def _mark_auto_sync() -> None:
         _auto_done_fallback = True
 
 
-def auto_sync(epoch: float, tz: str = "", threshold: float = 2.0) -> dict:
+def auto_sync(epoch: float, tz: str = "", threshold: float = 2.0,
+              rtc_trusted: bool = False) -> dict:
     """Take the clock from the first browser that shows up after a power-up.
 
     The marker is set when the clock was written *or* deliberately left alone
@@ -184,6 +226,10 @@ def auto_sync(epoch: float, tz: str = "", threshold: float = 2.0) -> dict:
             # a real time server has spoken on this board; a browser that
             # disagrees by minutes is the clock more likely to be wrong
             return {"ok": True, "skipped": "ntp", "drift": round(drift, 3), **st}
+        if rtc_trusted:
+            # same argument, stronger: the board is running off a battery-backed
+            # module, and a phone minutes out of step with it is the suspect
+            return {"ok": True, "skipped": "rtc", "drift": round(drift, 3), **st}
     if drift <= threshold:
         # close enough: don't jump the clock mid-log, but do adopt the timezone
         st = time_status()
@@ -300,3 +346,60 @@ def cpu_apply(governor: str = "", max_khz: int = 0) -> dict:
     if errors:
         res["message"] = "; ".join(errors)
     return res
+
+
+# -- power save ------------------------------------------------------------
+# A bike parked with the ignition off keeps the board retrying the link every
+# two seconds, at whatever speed config asks for, until the battery gives out.
+# Two steps, both counted from the last time the ECU actually answered: slow the
+# CPU right down, then power off. The decision is a pure function so the tests
+# can drive the whole ladder without a clock or an event loop.
+def power_save_step(idle_s: float, cfg: dict, level: int, busy: bool) -> str | None:
+    """What power save should do right now: "slow", "off", "restore" or nothing.
+
+    ``level`` is what it has already done (0 = nothing, 1 = slowed down).
+    ``busy`` refuses the poweroff only: slowing the CPU down leaves the UI alive
+    and is always safe, while powering off under a rider reading logs in the
+    garage is not.
+
+    0 in either timer disables the step it times: ``idle_min == 0`` means the
+    board never slows down (and so never reaches "off" either, since that
+    requires having slowed down first); ``off_min == 0`` means it slows down
+    and stays there, never powering off. Two switches, not one -- a rider who
+    wants the CPU throttled but the board never unattended-off (or the other
+    way around) does not need a second config key for it.
+    """
+    ps = (cfg.get("system", {}) or {}).get("power_save", {}) or {}
+    if not ps.get("enabled"):
+        return "restore" if level else None
+    try:
+        idle_min = float(ps.get("idle_min", 15))
+        off_min = float(ps.get("off_min", 15))
+    except (TypeError, ValueError):
+        return "restore" if level else None
+    if idle_min <= 0:
+        return "restore" if level else None
+    if idle_s < idle_min * 60:
+        # the ECU answered again -- put the board back the way config asks
+        return "restore" if level else None
+    if level >= 2:
+        return None     # already told to power off; saying it again buys nothing
+    if level < 1:
+        return "slow"
+    if off_min <= 0:
+        return None     # slowed down and staying there: the off step is disabled
+    if idle_s >= (idle_min + off_min) * 60:
+        return None if busy else "off"
+    return None
+
+
+def power_save_target(st: dict) -> tuple[str, int]:
+    """The slowest the kernel on this board will actually agree to.
+
+    Asked for rather than assumed: ``cpu_apply`` refuses a governor or a
+    frequency the kernel does not offer, and a board that has no "powersave"
+    governor should still get the frequency ceiling.
+    """
+    gov = "powersave" if "powersave" in (st.get("governors") or []) else ""
+    freqs = st.get("freqs_khz") or []
+    return gov, (min(freqs) if freqs else 0)

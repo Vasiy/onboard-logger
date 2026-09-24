@@ -15,6 +15,7 @@ import json
 import logging
 import re
 import shutil
+import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -26,12 +27,13 @@ from fastapi.staticfiles import StaticFiles
 
 from .kline.ecu_id import load_fields, parse_desc
 from .kline.logger import KLineWorker
-from .web import system
+from .web import fan, rtc, system
 from .web import addons as addons_mod
 from .web.archive import (flat_entries, resolve_in, safe_name, split_names,
                           zip_entries)
 from .web.addons import AddonManager
-from .web.config_mgr import ConfigManager, REPO_DIR, _deep_merge
+from .web.config_mgr import (ConfigManager, REPO_DIR, _clamp_fan_period_ns, _deep_merge,
+                             resolve_kline_port)
 from .web.diag import DiagLog
 from .web.storage import StorageManager, parse_day
 from .web import update as update_mod
@@ -429,6 +431,7 @@ fwm: FirmwareManager | None = None
 diag: DiagLog | None = None
 storage: StorageManager | None = None
 upd: UpdateManager | None = None
+fan_controller = fan.FanController()
 
 
 def _after_network(cfg: dict, rep: dict) -> None:
@@ -454,6 +457,49 @@ async def lifespan(app: FastAPI):
     # events never reach journald (and from there /var/log/syslog)
     logging.basicConfig(level=logging.INFO, format="%(name)s %(message)s")
     cfg = cm.load()
+
+    # The clock, before anything can open a log with a date in it. The kernel's
+    # own hctosys belongs to whichever RTC registered first -- on this board the
+    # PMIC's batteryless one, which brings the system up in 2016 -- so running
+    # off a module means reading it here explicitly, by name. The auto-sync
+    # marker is burned with it: the board is now the authority, and the first
+    # browser through the door must not nudge it back.
+    def _clock_from_rtc(dev: str) -> None:
+        log = logging.getLogger("rtc")
+        ok, err = system.rtc_to_system(dev)
+        if ok:
+            system._mark_auto_sync()
+            log.info("clock from %s: %s", dev, system.time_status()["local"])
+        else:
+            log.warning("clock from %s failed: %s", dev, err)
+
+    if rtc.source(cfg) == "rtc":
+        _rtc_boot = _rtc_target(cfg)
+        if _rtc_boot:
+            _clock_from_rtc(_rtc_boot)
+        else:
+            # An i2c RTC probes on its own schedule: on this board rtc1 registers
+            # at ~14.8 s while the unit is only After=network.target, so at a cold
+            # boot the module is simply not there yet and a single look would
+            # skip the read without a word -- leaving the board in 2016, which is
+            # the whole failure this feature exists to fix. So wait for it, in a
+            # task: doing it inline holds up the port the UI is served on.
+            # A log opened in the meantime is not lost -- _reconcile_storage()
+            # follows the clock across a day boundary under an open file.
+            async def _wait_for_rtc(deadline_s: float = 60.0):
+                log = logging.getLogger("rtc")
+                waited = 0.0
+                while waited < deadline_s:
+                    await asyncio.sleep(2.0)
+                    waited += 2.0
+                    dev = await asyncio.to_thread(_rtc_target)
+                    if dev:
+                        log.info("%s appeared after %.0f s", dev, waited)
+                        await asyncio.to_thread(_clock_from_rtc, dev)
+                        return
+                log.warning("no trusted RTC after %.0f s; clock stays as booted", deadline_s)
+
+            asyncio.create_task(_wait_for_rtc())
 
     # Bring the AP up (idempotent) *after* the port is listening: hostapd waits up
     # to 30 s for wlan0 in its pre-start, so doing this inline kept the web UI
@@ -487,6 +533,75 @@ async def lifespan(app: FastAPI):
             await asyncio.sleep(5)
 
     asyncio.create_task(_cpu_health())
+
+    # Fan control: PWM duty from CPU temperature, optional tach feedback --
+    # in this process (fan_controller, app/web/fan.py), not a separate
+    # service, so it ships through the ordinary Update mechanism instead of
+    # needing code execution from an Add-ons upload (which onboard-logger
+    # never does, by design). 1s cadence, independent of CPU health's 5s one,
+    # so the settings page's live RPM/duty reading is responsive. Gated on
+    # fan.enabled: off by default, so a freshly updated board does not start
+    # driving unconfigured PWM/GPIO pins on its own.
+    async def _fan_control():
+        while True:
+            try:
+                fan_cfg = cm.load().get("fan", {})
+                if fan_cfg.get("enabled"):
+                    status = await asyncio.to_thread(
+                        fan_controller.tick, fan_cfg,
+                        now_monotonic=time.monotonic(), now_wall=time.time())
+                    state.set_fan(status)
+                else:
+                    state.set_fan({})
+            except Exception:
+                pass
+            await asyncio.sleep(1)
+
+    asyncio.create_task(_fan_control())
+
+    # Power save: slow the CPU down, then power off, counted from the last time
+    # the ECU answered. Shares the health task's cadence rather than getting one
+    # of its own -- five seconds is far finer than a timer measured in minutes.
+    async def _power_save():
+        log = logging.getLogger("power")
+        level = 0
+        while True:
+            await asyncio.sleep(5)
+            try:
+                cfg_now = cm.load()
+                idle = state.ecu_idle_s()
+                # the poweroff is the only step a busy board refuses; slowing
+                # down leaves the UI up, just slower
+                # upd covers the other four: a firmware operation, an open ride
+                # log, a running scan and an update already in flight
+                busy = bool(_ws_live) or bool(
+                    upd.busy_reason() if upd is not None else "")
+                act = system.power_save_step(idle, cfg_now, level, busy)
+                if act == "slow":
+                    st = await asyncio.to_thread(system.cpu_status)
+                    gov, khz = system.power_save_target(st)
+                    # cpu_apply directly, never POST /api/system/cpu: that path
+                    # writes config, and powersave would become the rider's
+                    # stored preference and survive the next boot
+                    await asyncio.to_thread(system.cpu_apply, gov, khz)
+                    level = 1
+                    log.warning("no ECU for %.0f min: cpu -> %s %d kHz",
+                                idle / 60, gov or "(unchanged)", khz)
+                elif act == "restore":
+                    await asyncio.to_thread(_apply_cpu_cfg, cfg_now)
+                    level = 0
+                    log.warning("ECU back after %.0f min: cpu restored", idle / 60)
+                elif act == "off":
+                    # the diagnostics log only runs while a ride log is open,
+                    # which is never in this scenario -- the journal is the only
+                    # place this can leave a trace
+                    log.warning("no ECU for %.0f min: powering off", idle / 60)
+                    await asyncio.to_thread(system.shutdown)
+                    level = 2
+            except Exception as exc:   # power save must never take the UI down
+                log.warning("power save: %s", exc)
+
+    asyncio.create_task(_power_save())
     ecu_id_path = ETC / "ecu_id.json"
     if not ecu_id_path.exists():
         ecu_id_path = REPO_DIR / "config" / "ecu_id.json"
@@ -498,11 +613,15 @@ async def lifespan(app: FastAPI):
     state.set_storage(storage.dest, str(storage.active_root()), storage.fallback())
     # both writers ask the manager where to write at every file open, so a stick
     # plugged, pulled or picked takes effect without a restart
-    diag = DiagLog(storage.active_root, cfg.get("diag"),
-                   probe=lambda: {**(worker.stats() if worker else {}),
-                                  "link": state.snapshot().get("status", "")})
+    def _diag_probe() -> dict:
+        snap = state.snapshot()
+        return {**(worker.stats() if worker else {}), "link": snap.get("status", ""),
+                **fan.diag_fields(snap, cfg.get("fan"))}
+
+    diag = DiagLog(storage.active_root, cfg.get("diag"), probe=_diag_probe)
     worker = KLineWorker(
-        port=cfg["kline"]["port"],
+        port=resolve_kline_port(cfg),
+        iface=cfg["kline"].get("iface", "usb"),
         params_path=_params_path(),
         log_dir=storage.active_root,
         state=state,
@@ -537,7 +656,7 @@ async def lifespan(app: FastAPI):
         worker_getter=lambda: worker,
         util_path=UTIL_PATH,
         fw_dir=cfg.get("firmware_dir", "/root/firmware"),
-        port=cfg["kline"]["port"],
+        port=resolve_kline_port(cfg),
         state=state,
         ecu_fields=ecu_fields,
         guard=_guard_verdict,
@@ -706,15 +825,26 @@ async def get_state():
     return state.snapshot()
 
 
+# How many browsers are watching right now. Power save refuses to cut the power
+# under one: the ignition being off is exactly the same fact whether the bike is
+# parked in a field or the rider is standing over it in the garage reading logs,
+# and the open socket is the only thing that tells the two apart.
+_ws_live = 0
+
+
 @app.websocket("/ws")
 async def ws(websocket: WebSocket):
+    global _ws_live
     await websocket.accept()
+    _ws_live += 1
     try:
         while True:
             await websocket.send_json(state.snapshot())
             await asyncio.sleep(0.2)
     except (WebSocketDisconnect, RuntimeError):
         pass
+    finally:
+        _ws_live = max(0, _ws_live - 1)
 
 
 # -- logger control --------------------------------------------------------
@@ -1295,6 +1425,7 @@ async def firmware_file_delete(name: str):
 async def post_config(payload: dict):
     prev = cm.load()
     cfg = _deep_merge(prev, payload)
+    _clamp_fan_period_ns(cfg)
     try:
         cm.validate(cfg)
     except ValueError as exc:
@@ -1309,9 +1440,20 @@ async def post_config(payload: dict):
         worker.set_zip_after(cfg.get("logging", {}).get("zip_after", False))
         kp, kn = prev.get("kline", {}), cfg.get("kline", {})
         if (kp.get("baud") != kn.get("baud") or kp.get("echo") != kn.get("echo")
-                or kp.get("init") != kn.get("init")):
+                or kp.get("init") != kn.get("init") or kp.get("iface") != kn.get("iface")):
             worker.apply_kline(kn.get("baud", "auto"), kn.get("echo", True),
-                               kn.get("init", "fast"))
+                               kn.get("init", "fast"), port=resolve_kline_port(cfg),
+                               iface=kn.get("iface", "usb"))
+        if fwm is not None and kp.get("iface") != kn.get("iface"):
+            fwm.set_port(resolve_kline_port(cfg))
+    # Switching the clock over to the module takes effect now, not at the next
+    # boot: a rider who picks "hardware RTC" and watches the board time stay
+    # wrong has been told the setting did nothing.
+    if rtc.source(cfg) == "rtc" and rtc.source(prev) != "rtc":
+        dev = _rtc_target(cfg)
+        if dev:
+            ok, err = await asyncio.to_thread(system.rtc_to_system, dev)
+            logging.getLogger("rtc").info("clock from %s: %s", dev, "ok" if ok else err)
     report = cm.plan(prev, cfg)
 
     async def _apply():
@@ -1446,9 +1588,71 @@ async def set_cpu(payload: dict):
     return res
 
 
+
+@app.get("/api/fan/tach_pins")
+async def get_fan_tach_pins():
+    """Header pins currently free to wire a tach sensor to, by physical
+    number -- the settings page has no reason to show Rockchip's internal
+    gpioN-M numbering, which is exactly what caused the pin-16-is-actually-
+    Ethernet confusion this endpoint exists to avoid repeating."""
+    return {"pins": await asyncio.to_thread(fan.list_available_tach_pins)}
+
+
+@app.post("/api/fan/probe")
+async def probe_fan_gpio(payload: dict):
+    """Try a candidate tach GPIO before saving it: sweeps duty from 10% to
+    100% (see fan.FanController.probe) looking for the point the fan starts
+    producing tach pulses at all. When the sweep found it spinning, the
+    result -- min_duty_pct and max_rpm -- is persisted right away, so the
+    calibration survives a reboot without a separate save step; a sweep
+    that never saw a pulse (active: False) leaves any prior calibration
+    alone rather than clobbering it with Nones."""
+    try:
+        gpio = int(payload.get("gpio"))
+    except (TypeError, ValueError):
+        return JSONResponse(status_code=400, content={"error": "err.fan_bad_gpio"})
+    cfg = cm.load().get("fan", {})
+    if not cfg.get("pwm_chip"):
+        return JSONResponse(status_code=400, content={"error": "err.fan_no_chip"})
+    try:
+        result = await asyncio.to_thread(fan_controller.probe, cfg, gpio)
+    except fan.TachUnavailable:
+        return JSONResponse(status_code=503, content={"error": "err.fan_tach_disabled"})
+    except (OSError, TimeoutError) as exc:
+        return JSONResponse(status_code=500, content={"error": "err.fan_probe_failed",
+                                                       "detail": str(exc)})
+    if result["active"]:
+        full_cfg = cm.load()
+        full_cfg.setdefault("fan", {})["min_duty_pct"] = result["min_duty_pct"]
+        if result["max_rpm"] is not None:
+            full_cfg["fan"]["max_rpm"] = result["max_rpm"]
+            fan_controller._max_rpm = result["max_rpm"]
+        cm.save(full_cfg)
+    return result
+
+
 def _auto_time_enabled(cfg: dict | None = None) -> bool:
     c = cfg if cfg is not None else cm.load()
     return bool(c.get("system", {}).get("auto_time_sync", True))
+
+
+def _rtc_target(cfg: dict | None = None) -> str:
+    """The module the clock should be written to, or "".
+
+    Only when config actually asks to run off the RTC: with source "web" the
+    board is no more authoritative than the phone, and writing the browser's
+    guess into a battery-backed module would make it authoritative next boot.
+    """
+    c = cfg if cfg is not None else cm.load()
+    if rtc.source(c) != "rtc":
+        return ""
+    chosen = rtc.pick(c)
+    return chosen["dev"] if chosen else ""
+
+
+@app.get("/api/system/rtc")
+async def get_rtc():
+    return rtc.status(cm.load())
 
 
 @app.get("/api/system/time")
@@ -1460,8 +1664,13 @@ async def get_time():
 
 @app.post("/api/system/time")
 def post_time(payload: dict):
-    """Set the board clock from the connected browser (no internet on the bike)."""
-    return system.set_time(payload.get("epoch", 0), str(payload.get("tz", "")))
+    """Set the board clock from the connected browser (no internet on the bike).
+
+    Running off a hardware RTC, this also writes the module: correcting only the
+    running clock would last until the next boot and no longer.
+    """
+    return system.set_time(payload.get("epoch", 0), str(payload.get("tz", "")),
+                           rtc_dev=_rtc_target())
 
 
 @app.post("/api/system/time/auto")
@@ -1471,9 +1680,11 @@ def post_time_auto(payload: dict):
     Every page load calls this; the once-per-boot marker lives on the server, so
     several tabs racing each other cannot set the clock twice.
     """
-    if not _auto_time_enabled():
+    cfg = cm.load()
+    if not _auto_time_enabled(cfg):
         return {"ok": False, "error": "err.auto_off"}
-    return system.auto_sync(payload.get("epoch", 0), str(payload.get("tz", "")))
+    return system.auto_sync(payload.get("epoch", 0), str(payload.get("tz", "")),
+                            rtc_trusted=bool(_rtc_target(cfg)))
 
 
 # -- logs ------------------------------------------------------------------

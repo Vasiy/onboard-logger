@@ -106,16 +106,34 @@ def test_first_preset_is_the_boot_default_but_never_an_override():
 
 def test_poll_cost_is_per_request_and_smoothed():
     main.state.poll_req_ms = 0.0
-    main.state.set_poll_cost(0.180, 9)          # 180 ms for nine requests
+    main.state.poll_fixed_ms = 0.0
+    main.state.set_poll_cost(0.180, 9, 0.030)   # 180 ms of wire over nine requests
     assert main.state.poll_req_ms == 20.0, main.state.poll_req_ms
-    main.state.set_poll_cost(0.360, 9)          # 40 ms each -> smoothed towards it
+    assert main.state.poll_fixed_ms == 30.0, main.state.poll_fixed_ms
+    main.state.set_poll_cost(0.360, 9, 0.030)   # 40 ms each -> smoothed towards it
     assert 20.0 < main.state.poll_req_ms < 40.0, main.state.poll_req_ms
     # a cycle that polled nothing says nothing about the cost of a request
     before = main.state.poll_req_ms
-    main.state.set_poll_cost(0.5, 0)
-    main.state.set_poll_cost(0.0, 4)
+    main.state.set_poll_cost(0.5, 0, 0.1)
+    main.state.set_poll_cost(0.0, 4, 0.1)
     assert main.state.poll_req_ms == before
     assert main.state.snapshot()["poll_req_ms"] == before
+
+
+def test_the_fixed_half_of_a_cycle_is_charged_once():
+    """Fixed work must not divide by the request count.
+
+    Folding it into the per-request average was the whole defect: the same board
+    doing the same 30 ms of derive/CSV/keepalive priced it at 10 ms per request
+    with three selected and at 2 ms with fifteen, so an estimate calibrated at one
+    selection size was wrong at every other one.
+    """
+    for requests in (3, 15):
+        main.state.poll_req_ms = 0.0
+        main.state.poll_fixed_ms = 0.0
+        main.state.set_poll_cost(0.020 * requests, requests, 0.030)
+        assert main.state.poll_req_ms == 20.0, requests
+        assert main.state.poll_fixed_ms == 30.0, requests
 
 
 def test_snapshot_hands_out_copies():

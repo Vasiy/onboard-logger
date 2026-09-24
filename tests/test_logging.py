@@ -297,6 +297,34 @@ def test_link_up_opens_the_diagnostics_file_it_belongs_to():
         assert w._link_ctx == {}, "the context belongs to the link that just ended"
 
 
+def test_link_up_records_the_active_interface():
+    """iface (usb / uart1) rides alongside baud into link_up, same as it does
+    into apply_kline's live reload -- see logger.py's apply_kline/_link_ctx."""
+    with tempfile.TemporaryDirectory() as tmp:
+        seen = []
+
+        class FakeDiag:
+            def start(self):
+                seen.append("start")
+
+            def stop(self):
+                seen.append("stop")
+
+            def event(self, kind, **f):
+                seen.append((kind, f.get("iface")))
+
+        w = KLineWorker(port="/dev/null", iface="uart1", params_path=PARAMS,
+                        log_dir=tmp, state=State(), led=Led(), diag=FakeDiag())
+        assert w.iface == "uart1"
+        w._link_ctx = {"baud": 10400, "init": "fast", "ecu": "IAW5AM", "iface": w.iface}
+        w._reconcile_logging()
+        assert seen[0] == "start" and seen[1] == ("link_up", "uart1"), seen
+
+        # apply_kline switches the interface live, same as a Config-tab save
+        w.apply_kline("auto", port="/dev/kline", iface="usb")
+        assert w.port == "/dev/kline" and w.iface == "usb"
+
+
 def _main():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

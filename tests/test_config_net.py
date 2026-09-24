@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.web.config_mgr import ConfigManager  # noqa: E402
+from app.web.config_mgr import ConfigManager, UART1_PORT, resolve_kline_port  # noqa: E402
 
 DEFAULTS = Path(__file__).resolve().parent.parent / "config" / "config.default.json"
 
@@ -199,6 +199,38 @@ def test_validate_rules():
             except ValueError:
                 continue
             raise AssertionError(f"expected ValueError for {cfg['wifi']}")
+
+
+def test_resolve_kline_port():
+    assert resolve_kline_port(_cfg()) == "/dev/kline"                 # default: usb
+    assert resolve_kline_port(_cfg(kline__iface="usb")) == "/dev/kline"
+    assert resolve_kline_port(_cfg(kline__iface="uart1")) == UART1_PORT == "/dev/ttyS1"
+    # the USB path stays whatever kline.port says even if it's been overridden
+    assert resolve_kline_port(_cfg(kline__port="/dev/ttyUSB3")) == "/dev/ttyUSB3"
+
+
+def test_kline_iface_validation():
+    with tempfile.TemporaryDirectory() as tmp:
+        cm = _cm(tmp)
+        cm.validate(_cfg(kline__iface="usb"))
+        cm.validate(_cfg(kline__iface="uart1"))
+        try:
+            cm.validate(_cfg(kline__iface="bluetooth"))
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("expected ValueError for an unknown kline.iface")
+
+
+def test_plan_reports_kline_iface_switch():
+    with tempfile.TemporaryDirectory() as tmp:
+        cm = _cm(tmp)
+        usb = _cfg(kline__iface="usb")
+        uart1 = _cfg(kline__iface="uart1")
+        rep = cm.plan(usb, uart1)
+        assert any(a["k"] == "apply.klineIface" for a in rep["applied"]), rep["applied"]
+        same = cm.plan(usb, _cfg(kline__iface="usb"))
+        assert not any(a["k"] == "apply.klineIface" for a in same["applied"]), same["applied"]
 
 
 def _main():

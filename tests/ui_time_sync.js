@@ -1,7 +1,8 @@
 "use strict";
 // Headless harness for the one clock the bike has: the phone's.
 //
-// The board has no battery-backed RTC, so it comes up at whatever time it was
+// Without a battery-backed module wired on (app/web/rtc.py finds one by driver
+// name when there is), the board comes up at whatever time it was
 // last shut down with and file names, CSV timestamps and the day folder every
 // log lands in all come from that clock. The browser offers its own at boot —
 // but a phone that keeps the page open reconnects only the websocket when the

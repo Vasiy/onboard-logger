@@ -67,11 +67,38 @@ parameters and records to `/root/k-line/`.
     checkbox) plus a manual *Sync from this device* button, and **appearance** (auto / light / dark,
     a per-device choice, not board config). Non-network settings save themselves on change; network
     ones wait for *Save & apply*, with a count of pending network fields that follows the scroll.
+- **Hardware clock**: with a battery-backed RTC module wired on, Config → System offers a switch
+  between it and the connected device. The board finds the module by driver name rather than by
+  taking the first `/dev/rtc*` — most boards carry an SoC or PMIC clock that answers, has no
+  battery and is wrong — reads it at boot before any log is opened, and makes the *Sync from this
+  device* button write the browser's time into the module rather than only into the running clock.
+- **Power save**: with the ignition off the board keeps looking for the ECU every two seconds and
+  drains the battery, so Config → System can wind it down — lowest processor speed after N minutes
+  with no ECU, board off after M more (0 disables either step on its own, without touching the main
+  switch). Both steps are cancelled the moment the ECU answers; the poweroff also waits while a
+  browser has the page open, while a firmware operation or a scan is running, and while a ride log
+  is being written. Off by default.
 - **Update from the phone**: Config → System takes a `.tar.gz`/`.zip` of the project (built by
   `./release.sh`) and installs it — no network on the bike, no repository on the board. The archive
   is checked, the board's own offline test suite runs against it, and only then does the code get
   swapped in; if the new version does not come up, the previous one is restored automatically. The
   panel shows the running version, and every update leaves a log next to the ride logs.
+- **Fan control** (optional, `fan.enabled` in Config → System): PWM duty driven from this board's
+  own CPU temperature at 1 Hz, in-process (`app/web/fan.py`) — not a separate service. Wiring:
+  2-pin (temperature only), 3-pin (tach shares the 2-pin connector's own chopped power — **only
+  accurate at 100% duty**, flagged `rpm_valid: false` otherwise), or 4-pin (dedicated PWM + tach,
+  accurate at any duty). The tach line is open-collector — its pull-up must go to **3.3V**, never
+  the fan's 5V rail (this board's GPIOs are 3.3V-only). The settings page lists only header pins
+  the board's own pinmux currently reports free. The Probe button sweeps duty from 10% to 100% on
+  the candidate pin and calibrates it: `min_duty_pct`, the lowest step that produced any tach
+  pulse (below it `tick()` reports a confident 0 rpm instead of reading a coast/chop artifact),
+  and `max_rpm`, the rpm read at the 100% step. Both save to config the moment a sweep finds the
+  fan spinning; a sweep that never sees a pulse leaves a prior calibration untouched rather than
+  clobbering it. PWM frequency is adjustable (a
+  slider, 25 Hz–25 kHz) — lower suits the 2-pin connector's own power-chop, ~21–28 kHz is the
+  datasheet range for a true 4-wire PWM input. Unticking `fan.enabled` stops cooling entirely —
+  the kernel still throttles at its own thermal trip, but nothing else drives the PWM. Optional:
+  log RPM into the board's own diagnostics log (`fan.log`), only while a ride log is open.
 - **8 locales** (En default, De, Es, Fr, It, Nl, Bg, Ru).
 - **Field details**: a dropped Wi-Fi link shows itself (values go muted and the status says the link
   is lost, so a frozen snapshot never passes for a live one), destructive actions ask in an in-page
@@ -140,6 +167,7 @@ these keys are worth knowing:
 | `network.ap_ip` / `prefix` | AP address; `network.gateway` is optional, empty = clients get no default route |
 | `dhcp.*` | DHCP **server**, AP mode only |
 | `kline.port` / `baud` / `echo` / `init` | K-Line bus (`baud: "auto"` tries 10400/9600/15625/19200) |
+| `kline.iface` | `usb` (FTDI adapter, `kline.port`) or `uart1` (direct GPIO header, fixed `/dev/ttyS1`) |
 | `testing.pulse_ms` | actuator pulse length, 500…30000 |
 | `testing.session_init` | set `false` to stop arming the `83` + `10 81` diagnostic session before tests |
 | `system.auto_time_sync` | take the clock from the first web client after a power-up (default `true`) |

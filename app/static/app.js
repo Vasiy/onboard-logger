@@ -76,6 +76,7 @@ function applyLocale(loc) {
   if (catalog.length) renderParams();
   if (presets) renderPresets();
   showSparkSpan(null);                 // "s" is translated too
+  if (fanFreqHz != null) renderFanFreqValue(fanFreqHz);
   if (lastSnapshot) applySnapshot(lastSnapshot);
 }
 
@@ -595,13 +596,17 @@ function noteTarget() {
 const noteText = (i) => (i >= 0 && presets ? presets[i].note || "" : freeNote);
 const sameSet = (set, keys) => set.size === keys.length && keys.every((k) => set.has(k));
 
-// What a set costs, in the unit the card header already shows. One 0x21 request
-// per *distinct* rli — channels sharing one are answered together (the `cache` in
-// the worker's poll loop) — and the worker never cycles faster than params.json's
-// poll_interval_ms, so the estimate is clamped by that floor. The per-request cost
-// is measured on the live bus (`poll_req_ms`, the loop's own elapsed time before
-// the padding wait); with no link it falls back to the wire arithmetic below,
-// which is a floor, not a promise: the ECU's own response delay dominates it.
+// What a set costs, in the unit the card header already shows. A cycle is two
+// costs, not one: `poll_req_ms` per *distinct* rli — channels sharing one are
+// answered together (the `cache` in the worker's poll loop) — plus `poll_fixed_ms`
+// charged once, for the work a cycle does whatever the selection (derive, CSV
+// write, log reconcile, keepalive). Both are measured on the live bus, before the
+// wait that pads a cycle out to poll_interval_ms, and the result is clamped by
+// that same interval as the floor. Pricing it as n·per alone was wrong by exactly
+// the fixed half, and wrong by more the larger the selection got.
+// With no link only the wire arithmetic is left, and the fixed half is taken as
+// zero: there is no paper value for it — it is a property of this board and its
+// storage — and a made-up constant would be worse than an honest floor.
 const PAPER_REQ_MS = 13.5;      // 6-byte request + 8-byte reply at 10400 8N1
 
 function reqCount(keys) {
@@ -616,8 +621,9 @@ function estimateCost(keys) {
   if (!n) return null;
   const s = lastSnapshot || {};
   const per = s.poll_req_ms > 0 ? s.poll_req_ms : PAPER_REQ_MS;
+  const fixed = s.poll_req_ms > 0 ? (s.poll_fixed_ms || 0) : 0;
   const floor = s.poll_min_ms > 0 ? s.poll_min_ms : 150;
-  return { n, hz: Math.min(1000 / floor, 1000 / (n * per)), measured: s.poll_req_ms > 0 };
+  return { n, hz: 1000 / Math.max(floor, fixed + n * per) };
 }
 
 function renderPresetCost() {
@@ -1218,11 +1224,57 @@ function renderCpuTemp(s) {
   el.title = parts.join(" · ");
 }
 
+// Fan telemetry (app/web/fan.py's FanController, running in this process) --
+// not tied to anything while fan.enabled is off, same rule renderPowerSave
+// follows for its own corner readout. A 3-wire fan sharing the 2-pin
+// connector's own PWM chop only has a trustworthy tach at 100% duty; a
+// reading flagged rpm_valid:false says so instead of showing a number that
+// is likely wrong.
+function renderFan(s) {
+  const el = $("#fanNow");
+  if (!el) return;
+  if (!cfgLoaded?.fan?.enabled || !s.fan_type) { el.textContent = ""; return; }
+  const parts = [`${Number(s.fan_temp_c || 0).toFixed(1)}°`, `${Number(s.fan_duty_pct || 0).toFixed(0)}%`];
+  // rpm_valid:false (3-pin fan below 100% duty) still shows the number --
+  // the full caveat for why it may be wrong lives in README.md's Fan control
+  // section now, not repeated inline on every live reading
+  if (s.fan_rpm != null) parts.push(`${Math.round(s.fan_rpm)} ${t("unit.rpm")}`);
+  el.textContent = parts.join(" · ");
+}
+
+// Visible only while the fan is actually being driven: hidden with no fan
+// configured/reporting (fan_type 0) and hidden again once duty drops to 0.
+// Rotation speed is three tiers of "percent of the fan's own maximum": <=33%
+// static, 33-66% slow, >66% fast. That percentage comes from rpm/max_rpm
+// when there's a trustworthy live reading to use (fan_max_rpm learned, and
+// fan_rpm currently valid -- fan_type 4 at any duty, fan_type 3 only at
+// 100%), and falls back to duty_pct otherwise: always for fan_type 2 (no
+// tach line exists at all), and for fan_type 3 below 100% duty, where the
+// reading is a known artifact of the 2-pin connector's own power chop (see
+// cfg.fanTypeHint) rather than real rpm.
+function renderFanIcon(s) {
+  const el = $("#fanIcon");
+  if (!el) return;
+  const dutyPct = Number(s.fan_duty_pct) || 0;
+  el.hidden = !s.fan_type || dutyPct <= 0;
+  el.classList.remove("fan-icon--slow", "fan-icon--fast");
+  if (el.hidden) return;
+  el.setAttribute("title", t("cfg.fanSpinning"));
+  let pctOfMax = dutyPct;
+  if (s.fan_max_rpm && s.fan_rpm != null && s.fan_rpm_valid !== false) {
+    pctOfMax = (s.fan_rpm / s.fan_max_rpm) * 100;
+  }
+  if (pctOfMax > 66) el.classList.add("fan-icon--fast");
+  else if (pctOfMax > 33) el.classList.add("fan-icon--slow");
+}
+
 function applySnapshot(s) {
   lastSnapshot = s;
   lastSnapAt = performance.now();
   setStale(false);
   renderCpuTemp(s);
+  renderFan(s);
+  renderFanIcon(s);
   $("#statusPill").className = "pill pill--" + s.status;
   if (s.status === "connected") {                 // short pill: ecu:<model> hw:<hw> connected
     const m = (s.ecu_hw || "").match(/^(.*?)(HW\d+)$/);
@@ -1249,6 +1301,7 @@ function applySnapshot(s) {
   const polling = s.status === "connected" && (s.selected || []).length > 0 && !s.scan_on;
   $("#pollHz").textContent = polling ? (s.poll_hz || 0).toFixed(1) + " " + t("unit.hz") : "—";
   $("#busBaud").textContent = s.bus_baud ? s.bus_baud + " " + t("unit.baud") : "—";
+  renderPowerSave(s);
 
   const dT = $("#decToggle"), rT = $("#rawToggle");
   if (document.activeElement !== dT) dT.checked = s.logging_decoded;
@@ -1654,7 +1707,11 @@ $("#markBtn").addEventListener("click", () => {
 $("#actPulse").addEventListener("change", savePulse);
 $("#actStopBtn").addEventListener("click", () => runTest("#actResult", "actuator/stop", "test.actStopped"));
 
-// No battery-backed RTC on the board: offer this browser's clock. Fire-and-forget
+// The board's own clock is not to be trusted on its own -- without a
+// battery-backed module wired on (see app/web/rtc.py) it comes up at whatever
+// the SoC clock kept, which on this one is 2016 -- so offer this browser's.
+// The board refuses the offer when it is running off a real module.
+// Fire-and-forget
 // — the server holds the once-per-power-up marker (and re-syncs anyway when the
 // two clocks are minutes apart), so racing tabs cannot set the clock twice.
 let autoTimeOff = false;
@@ -1684,6 +1741,23 @@ function connectWS() {
 }
 
 // ---------- config ----------
+// How long the ECU has been silent, in the words the power-save timers use.
+// Connected says so instead of showing a zero that would look like a stalled
+// timer, and the board is the only thing that can count this: the phone may
+// have joined the AP long after the ignition went off.
+function renderPowerSave(s) {
+  const el = $("#powerSaveNow");
+  if (!el) return;
+  // Off by default, and the countdown means nothing while it is off -- shown
+  // anyway it was a number in the corner with nothing to tie it to.
+  if (!cfgLoaded?.system?.power_save?.enabled) { el.textContent = ""; return; }
+  if (s.status === "connected") { el.textContent = t("cfg.powerSaveLive"); return; }
+  const idle = Number(s.ecu_idle_s || 0);
+  el.textContent = idle >= 60
+    ? Math.floor(idle / 60) + " " + t("unit.min")
+    : Math.round(idle) + " " + t("unit.sec");
+}
+
 async function loadConfig() {
   let cfg;
   try { cfg = await api("/api/config"); } catch (e) { return; }
@@ -1702,7 +1776,202 @@ async function loadConfig() {
   markNetDirty();
   loadWifiChart();
   loadCpu();
+  loadRtc();
+  loadFanFreqSlider();
+  loadFanTachPins();
 }
+
+// ---------- Fan (app/web/fan.py -- runs in this process, see README.md's
+// Fan control section for the wiring/safety notes that used to live here) --
+// pwm_chip has no UI control -- the default sysfs path is right for this
+// board and a customer has no way to know what a different one would even
+// mean; it stays a config.json-only knob for the rare board that needs it.
+
+// period_ns is genuinely configurable end to end (fan.py just writes whatever
+// it's given to the PWM's sysfs `period` file, same as ckwun's original
+// script did with a fixed value) -- so it gets a real control instead of a
+// read-only number. Bounded to 50-500 Hz, same hardware-safe range as
+// pwm-fan-addon's period_ns clamp: below 50 Hz the 2-pin connector's MOSFET
+// chop turns audible/mechanically rough, above 500 Hz is past what this has
+// been run with. Log-scaled so low-end steps stay fine-grained too.
+const FAN_FREQ_MIN_HZ = 50, FAN_FREQ_MAX_HZ = 500;
+function freqFromSlider(pos) {
+  return Math.round(FAN_FREQ_MIN_HZ * Math.pow(FAN_FREQ_MAX_HZ / FAN_FREQ_MIN_HZ, pos / 100));
+}
+function sliderFromFreq(freqHz) {
+  const clamped = Math.min(FAN_FREQ_MAX_HZ, Math.max(FAN_FREQ_MIN_HZ, freqHz));
+  return Math.round(100 * Math.log(clamped / FAN_FREQ_MIN_HZ) / Math.log(FAN_FREQ_MAX_HZ / FAN_FREQ_MIN_HZ));
+}
+// remembered so a locale switch can re-translate the unit without rereading
+// the log slider's own 101 discrete positions, which would round the shown
+// number instead of just the unit beside it (see applyLocale)
+let fanFreqHz = null;
+function renderFanFreqValue(freqHz) {
+  fanFreqHz = freqHz;
+  const el = $("#fanFreqValue");
+  if (el) el.textContent = `${freqHz} ${t("unit.hz")}`;
+}
+function loadFanFreqSlider() {
+  const el = $("#fanFreqSlider");
+  if (!el || !cfgLoaded) return;
+  const periodNs = getNested(cfgLoaded, "fan.period_ns");
+  const freqHz = periodNs ? Math.round(1e9 / periodNs) : 125;
+  el.value = sliderFromFreq(freqHz);
+  renderFanFreqValue(freqHz);
+}
+// live preview while dragging, no save -- period_ns is part of the cfg key
+// apply_config() reconfigures on, which means a 5s full-speed proving spin
+// on every change; saving on every 'input' event during a drag would fire
+// that spin dozens of times in a row
+$("#fanFreqSlider")?.addEventListener("input", () => {
+  renderFanFreqValue(freqFromSlider(Number($("#fanFreqSlider").value)));
+});
+$("#fanFreqSlider")?.addEventListener("change", async () => {
+  const periodNs = Math.round(1e9 / freqFromSlider(Number($("#fanFreqSlider").value)));
+  // duty_cycles_ns (the temperature-tier duty values) is a config.json-only
+  // field with no UI control -- left alone, its tiers stay sized for the
+  // old period. A lower frequency then leaves them all above the new,
+  // smaller period, and a real board's kernel rejects that sysfs write
+  // outright (see clamp_duty_ns, app/web/fan.py). Rescale proportionally
+  // so the curve's shape survives a frequency change.
+  const oldPeriodNs = getNested(cfgLoaded, "fan.period_ns");
+  const tiers = getNested(cfgLoaded, "fan.duty_cycles_ns") || [];
+  const dutyCyclesNs = oldPeriodNs ? tiers.map((d) => Math.round(d / oldPeriodNs * periodNs)) : tiers;
+  try {
+    await api("/api/config", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fan: { period_ns: periodNs, duty_cycles_ns: dutyCyclesNs } }),
+    });
+    toast(t("cfg.saved"), "ok");
+  } catch (e) { toastErr(e); }
+});
+
+// The settings page only ever shows physical header pin numbers -- Rockchip's
+// internal gpioN-M numbering is exactly what led to wiring pin 16 (a physical
+// header position) into what turned out to be GPIO number 16 (which is
+// actually the board's Ethernet PHY). The dropdown's value is still the real
+// Linux GPIO number underneath (what app/web/fan.py needs); only the label is
+// the physical pin.
+async function loadFanTachPins() {
+  const sel = $("#fanTachGpio");
+  if (!sel || !cfgLoaded) return;
+  let pins = [];
+  try { pins = (await api("/api/fan/tach_pins")).pins || []; } catch (e) { return; }
+  sel.innerHTML = "";
+  if (!pins.length) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = t("cfg.fanNoPins");
+    opt.disabled = true;
+    sel.appendChild(opt);
+    return;
+  }
+  const want = getNested(cfgLoaded, "fan.tach_gpio");
+  if (want == null) {
+    // nothing saved yet -- an explicit placeholder so the shown selection
+    // matches stored state; without it the browser auto-selects the first
+    // real pin, which looks configured (Probe would even test it) while
+    // fan.tach_gpio stays null and apply_config never starts a reader
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "—";
+    sel.appendChild(opt);
+  }
+  for (const p of pins) {
+    const opt = document.createElement("option");
+    opt.value = p.gpio;
+    opt.textContent = t("cfg.fanPinLabel").replace("%d", p.pin);
+    sel.appendChild(opt);
+  }
+  sel.value = want != null ? String(want) : "";
+}
+
+// Not part of #cfgForm's generic name="..." autosave (which would send this
+// select's value as a string; fan.tach_gpio must be an int) -- saved directly
+// here instead, the same way saveCpu() posts /api/system/cpu.
+$("#fanTachGpio")?.addEventListener("change", async () => {
+  const el = $("#fanTachGpio");
+  if (el.value === "") return;   // placeholder / no-pins-available option
+  const gpio = Number(el.value);
+  if (!Number.isFinite(gpio)) return;
+  try {
+    await api("/api/config", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fan: { tach_gpio: gpio } }),
+    });
+    toast(t("cfg.saved"), "ok");
+  } catch (e) { toastErr(e); }
+});
+
+async function probeFanGpio() {
+  const gpioEl = $("#fanTachGpio");
+  const out = $("#fanProbeResult");
+  if (!gpioEl || !out) return;
+  const gpio = Number(gpioEl.value);
+  if (!Number.isFinite(gpio) || gpioEl.value === "") {
+    out.textContent = t("err.fan_bad_gpio");
+    out.className = "hint fan-probe-bad";
+    return;
+  }
+  out.textContent = t("cfg.fanProbing");
+  out.className = "hint";
+  try {
+    const r = await api("/api/fan/probe", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ gpio }),
+    });
+    if (r.active) {
+      let msg = t("cfg.fanProbeActive").replace("%d", r.min_duty_pct);
+      if (r.max_rpm != null) msg += " · " + t("cfg.fanProbeMaxRpm").replace("%d", Math.round(r.max_rpm));
+      out.textContent = "✓ " + msg;
+    } else {
+      out.textContent = "✗ " + t("cfg.fanProbeInactive");
+    }
+    out.className = "hint " + (r.active ? "fan-probe-ok" : "fan-probe-bad");
+  } catch (e) {
+    out.textContent = t(e.message || "err.fan_probe_failed") + (e.detail ? " (" + e.detail + ")" : "");
+    out.className = "hint fan-probe-bad";
+  }
+}
+$("#fanProbeBtn")?.addEventListener("click", probeFanGpio);
+
+// ---------- clock source: the module on the bus, or this browser ----------
+// Shown only when a battery-backed module was found. This board answers with
+// two RTCs -- the PMIC's own has no battery, comes up in 2016 and is what
+// /dev/rtc points at -- so offering the list raw would be offering a choice
+// between a clock and a liar. app/web/rtc.py decides; this only draws it.
+async function loadRtc() {
+  const box = $("#rtcBox");
+  if (!box) return;
+  let d;
+  try { d = await api("/api/system/rtc"); } catch (e) { return; }
+  box.hidden = !d.available;
+  const hint = $("#autoTimeHint");
+  // the standing text says the board has no battery-backed clock; once it has
+  // one, that sentence is simply wrong
+  if (hint) hint.textContent = t(d.available ? "cfg.autoTimeHintRtc" : "cfg.autoTimeHint");
+  if (!d.available) return;
+  [...$("#rtcSource").children].forEach((b) => b.classList.toggle("on", b.dataset.src === d.source));
+}
+
+// Delegated on the container, like the log-kind filter: a fixed pair of static
+// buttons, so one listener beats one per button. Its own endpoint's answer is
+// what lights the switch, not an optimistic toggle here -- config can refuse
+// the value, and this way the button never claims a state the board did not
+// confirm. system.rtc.source still goes out through /api/config: that path is
+// what applies it live and what the RTC boot read consults.
+$("#rtcSource")?.addEventListener("click", async (e) => {
+  const b = e.target.closest("button");
+  if (!b || b.classList.contains("on")) return;
+  try {
+    await api("/api/config", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ system: { rtc: { source: b.dataset.src } } }),
+    });
+    toast(t("cfg.saved"), "ok");
+  } catch (err) { toast(String(err.message || err), "warn"); }
+  loadRtc();
+});
 
 // ---------- processor: governor and frequency ceiling ----------
 // Its own endpoint on purpose: /api/config drags apply_network along with it,

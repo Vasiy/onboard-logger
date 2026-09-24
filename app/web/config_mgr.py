@@ -38,6 +38,18 @@ WPA_CONF_DIR = Path("/etc/wpa_supplicant")
 DNSMASQ_CONF = Path("/etc/dnsmasq.d/onboard-logger.conf")
 WLAN_IFACE = "wlan0"
 
+# NanoPi NEO3 physical pins 8/10 (GPIO3_A4/A6, UART1_TX/RX) -- a fixed
+# platform tty, not a udev-enumerated device like the USB/FTDI /dev/kline
+# symlink, so there is nothing for the rider to override here.
+UART1_PORT = "/dev/ttyS1"
+
+
+def resolve_kline_port(cfg: dict) -> str:
+    """Which device node K-Line actually talks over, given kline.iface."""
+    if cfg.get("kline", {}).get("iface") == "uart1":
+        return UART1_PORT
+    return cfg["kline"]["port"]
+
 
 def _deep_merge(base: dict, over: dict) -> dict:
     out = copy.deepcopy(base)
@@ -49,6 +61,22 @@ def _deep_merge(base: dict, over: dict) -> dict:
     return out
 
 
+# Hardware-safe PWM frequency range for the fan's 2-pin-connector MOSFET
+# chop, same bound as pwm-fan-addon's period_ns clamp and the PWM frequency
+# slider (app.js): below 50 Hz the chop turns audible/mechanically rough,
+# above 500 Hz is past what this has been run with. Clamped rather than
+# rejected -- a stray period_ns (hand-edited config.json, or a slider value
+# saved before this bound existed) should not need a repair trip to fix.
+FAN_MIN_FREQ_HZ = 50
+FAN_MAX_FREQ_HZ = 500
+FAN_MAX_PERIOD_NS = 1_000_000_000 // FAN_MIN_FREQ_HZ
+FAN_MIN_PERIOD_NS = 1_000_000_000 // FAN_MAX_FREQ_HZ
+
+
+def _clamp_fan_period_ns(cfg: dict) -> None:
+    fan = cfg.get("fan")
+    if isinstance(fan, dict) and "period_ns" in fan:
+        fan["period_ns"] = max(FAN_MIN_PERIOD_NS, min(FAN_MAX_PERIOD_NS, fan["period_ns"]))
 
 
 def _act(key: str, value: str = "") -> dict:
@@ -111,6 +139,7 @@ class ConfigManager:
         cfg = self.defaults()
         if self.config_path.exists():
             cfg = _deep_merge(cfg, json.loads(self.config_path.read_text()))
+        _clamp_fan_period_ns(cfg)
         return cfg
 
     def save(self, cfg: dict) -> None:
@@ -186,6 +215,12 @@ class ConfigManager:
             if not (300 <= b <= 115200):
                 raise ConfigError("cfgerr.baud_range")
 
+        # which physical path K-Line rides on: the USB/FTDI adapter (port,
+        # below) or the board's own UART1 header with a directly-wired L9637D
+        iface = str(cfg.get("kline", {}).get("iface", "usb"))
+        if iface not in ("usb", "uart1"):
+            raise ConfigError("cfgerr.kline_iface")
+
         locale = cfg.get("locale", "en")
         if locale not in {"en", "de", "es", "fr", "it", "nl", "bg", "ru"}:
             raise ConfigError("cfgerr.locale", str(locale))
@@ -208,6 +243,31 @@ class ConfigManager:
         mp = str(st.get("mount_point", "/media/usb0"))
         if not mp.startswith("/") or ".." in mp:
             raise ConfigError("cfgerr.mount_point")
+
+        # Power save powers the board off, so a hand-edited config.json must not
+        # be able to say "in one second". Nothing else under system. is validated
+        # -- system.cpu got away without it because cpu_apply() refuses a value
+        # the kernel does not offer, and there is no such backstop here.
+        # 0 is in bounds on purpose: it is how a rider disables one step of the
+        # ladder without a second config key (power_save_step() in system.py).
+        ps = cfg.get("system", {}).get("power_save", {}) or {}
+        for key in ("idle_min", "off_min"):
+            try:
+                minutes = float(ps.get(key, 15))
+            except (TypeError, ValueError):
+                raise ConfigError("cfgerr.power_kind")
+            if not (0 <= minutes <= 99):
+                raise ConfigError("cfgerr.power_range")
+
+        # Where the clock comes from, and which module if not the first trusted
+        # one. The device name is checked for shape only -- whether it exists is
+        # the board's business and changes with the hardware.
+        rt = cfg.get("system", {}).get("rtc", {}) or {}
+        if str(rt.get("source", "web")) not in ("web", "rtc"):
+            raise ConfigError("cfgerr.rtc_source")
+        dev = str(rt.get("device", "") or "")
+        if dev and not re.fullmatch(r"rtc\d+", dev):
+            raise ConfigError("cfgerr.rtc_device", dev)
 
         # how far back a tile's sparkline looks; the slider offers 3..30 s and a
         # buffer outside that is either too short to read or pointlessly long
@@ -456,6 +516,8 @@ class ConfigManager:
             applied.append(_act("apply.echo"))
         if prev is None or pk.get("init") != nk.get("init"):
             applied.append(_act("apply.klineInit", nk.get("init", "fast")))
+        if prev is None or pk.get("iface") != nk.get("iface"):
+            applied.append(_act("apply.klineIface", nk.get("iface", "usb")))
         if prev is not None and prev.get("logging") != cfg.get("logging"):
             applied.append(_act("apply.logging"))
         if prev is not None and prev.get("locale") != cfg.get("locale"):

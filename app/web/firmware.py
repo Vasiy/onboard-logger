@@ -109,6 +109,11 @@ class FirmwareManager:
         self._proc: subprocess.Popen | None = None
         self._thread: threading.Thread | None = None
 
+    def set_port(self, port: str) -> None:
+        """Follow a live K-Line interface switch (main.post_config) -- start_read/
+        start_write/usb_facts all read self.port fresh per call, so this is enough."""
+        self.port = port
+
     # -- introspection -----------------------------------------------------
     def available(self) -> bool:
         return self.util_path.is_file()

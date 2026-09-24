@@ -294,7 +294,7 @@ posterior dibuja los mapas de inmediato.
 
 ## Versionado
 
-- **`VERSION`** está versionado y se sube a mano: el número de publicación, ahora `0.2.3`.
+- **`VERSION`** está versionado y se sube a mano: el número de publicación, ahora `0.2.4`.
 - **`BUILD`** va al lado, contiene `<versión> <describe> <rama> <fecha>`, lo sellan tanto
   `deploy.sh` como `release.sh` y **nunca se confirma**: un fichero que la placa hubiera generado
   dentro de su propio árbol rompería la verificación por sumas de comprobación de `deploy.sh` en

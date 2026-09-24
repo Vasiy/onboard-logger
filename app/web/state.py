@@ -27,13 +27,29 @@ class State:
         self.cpu_trip = 0.0           # C at the first passive thermal trip
         self.cpu_mhz = 0
         self.cpu_gov = ""
+        # fan telemetry from FanController.tick() (app/web/fan.py, runs in this
+        # process); zeros/None mean fan.enabled is off or no tick has run yet,
+        # same contract cpu_* has for a dev host with no cpufreq
+        self.fan_type = 0
+        self.fan_temp_c = 0.0
+        self.fan_duty_pct = 0.0
+        self.fan_rpm: float | None = None
+        self.fan_rpm_valid: bool | None = None
+        self.fan_max_rpm: float | None = None
+        self.fan_min_duty_pct: float | None = None
         self.values: dict[str, float | None] = {}
         self.values_ts = 0.0          # wall-clock of last measurement
         self.poll_hz = 0.0
-        # what one 0x21 request actually costs on this bus, and the floor the
-        # worker will not poll faster than: together they let the UI price a
-        # parameter set before it is applied
+        # What one 0x21 request actually costs on this bus, what a cycle costs
+        # regardless of how many requests it carries, and the floor the worker
+        # will not poll faster than: together they let the UI price a parameter
+        # set before it is applied. The two halves are measured separately
+        # because a cycle's fixed work — derive, CSV write, log reconcile,
+        # keepalive — does not scale with the selection, and folding it into a
+        # per-request average made that average drift with the selection size:
+        # the estimate could then only be right at the size it was measured at.
         self.poll_req_ms = 0.0
+        self.poll_fixed_ms = 0.0
         self.poll_min_ms = 0
         # two independent log streams
         self.logging_decoded = False
@@ -73,8 +89,27 @@ class State:
         self.act_key = ""
         self.act_until = 0.0           # wall-clock end of the pulse (0 = idle)
         self._last_poll_mono = 0.0
+        # When the ECU was last *proven* to be there. Power save counts from this
+        # and never from the status, because with no adapter the status alternates
+        # searching -> error every reconnect_delay: anything keyed off a status
+        # transition sees an edge every two seconds and never times anything out.
+        # None = the ECU has not answered since this process started, and the
+        # idle clock then runs from process start.
+        self._ecu_seen_mono: float | None = None
+        self._started_mono = time.monotonic()
 
     # -- writers (worker thread) ------------------------------------------
+    def set_link_seen(self) -> None:
+        """The ECU just answered. Positive evidence only -- see _ecu_seen_mono."""
+        with self._lock:
+            self._ecu_seen_mono = time.monotonic()
+
+    def ecu_idle_s(self) -> float:
+        """Seconds since the ECU last answered; process uptime if it never has."""
+        with self._lock:
+            seen = self._ecu_seen_mono
+        return time.monotonic() - (seen if seen is not None else self._started_mono)
+
     def set_status(self, status: str, msg: str = "") -> None:
         with self._lock:
             self.status = status
@@ -121,6 +156,19 @@ class State:
             self.cpu_trip = float(st.get("trip_c", 0) or 0)
             self.cpu_mhz = int((st.get("cur_khz", 0) or 0) / 1000)
             self.cpu_gov = str(st.get("governor", "") or "")
+
+    def set_fan(self, st: dict) -> None:
+        """Take what FanController.tick() just computed. An empty dict
+        (fan.enabled off) resets every field, so turning the feature off
+        does not leave the last reading showing."""
+        with self._lock:
+            self.fan_type = int(st.get("fan_type", 0) or 0)
+            self.fan_temp_c = float(st.get("temp_c", 0) or 0)
+            self.fan_duty_pct = float(st.get("duty_pct", 0) or 0)
+            self.fan_rpm = st.get("rpm")
+            self.fan_rpm_valid = st.get("rpm_valid")
+            self.fan_max_rpm = st.get("max_rpm")
+            self.fan_min_duty_pct = st.get("min_duty_pct")
 
     def set_bus_baud(self, baud: int) -> None:
         with self._lock:
@@ -209,15 +257,25 @@ class State:
         with self._lock:
             self.poll_min_ms = int(ms)
 
-    def set_poll_cost(self, busy_s: float, requests: int) -> None:
-        """Cost of one request, from the poll loop's own elapsed time — measured
-        *before* the wait that pads a cycle out to poll_interval_ms, so a small
-        selection that idles most of its cycle still prices a large one correctly."""
-        if requests <= 0 or busy_s <= 0:
+    def set_poll_cost(self, bus_s: float, requests: int, fixed_s: float = 0.0) -> None:
+        """What a poll cycle costs, split into the half that scales and the half
+        that does not.
+
+        `bus_s` is the time actually spent on the wire, so `bus_s / requests` is a
+        per-request cost that stays put as the selection grows; `fixed_s` is the
+        rest of the cycle — derive, CSV write, log reconcile, keepalive — and is
+        charged once. Both are measured *before* the wait that pads a cycle out to
+        poll_interval_ms, so a small selection that idles most of its cycle still
+        prices a large one correctly.
+        """
+        if requests <= 0 or bus_s <= 0:
             return
-        ms = (busy_s * 1000.0) / requests
+        ms = (bus_s * 1000.0) / requests
+        fixed_ms = max(0.0, fixed_s) * 1000.0
         with self._lock:
             self.poll_req_ms = round(0.7 * self.poll_req_ms + 0.3 * ms, 2) if self.poll_req_ms else round(ms, 2)
+            self.poll_fixed_ms = (round(0.7 * self.poll_fixed_ms + 0.3 * fixed_ms, 2)
+                                  if self.poll_fixed_ms else round(fixed_ms, 2))
 
     def set_selected(self, keys: list[str]) -> None:
         with self._lock:
@@ -255,10 +313,21 @@ class State:
                 "cpu_trip": self.cpu_trip,
                 "cpu_mhz": self.cpu_mhz,
                 "cpu_gov": self.cpu_gov,
+                "fan_type": self.fan_type,
+                "fan_temp_c": self.fan_temp_c,
+                "fan_duty_pct": self.fan_duty_pct,
+                "fan_rpm": self.fan_rpm,
+                "fan_rpm_valid": self.fan_rpm_valid,
+                "fan_max_rpm": self.fan_max_rpm,
+                "fan_min_duty_pct": self.fan_min_duty_pct,
                 "values": dict(self.values),
                 "values_ts": self.values_ts,
                 "poll_hz": self.poll_hz,
+                "ecu_idle_s": round(time.monotonic() - (self._ecu_seen_mono
+                                                        if self._ecu_seen_mono is not None
+                                                        else self._started_mono), 1),
                 "poll_req_ms": self.poll_req_ms,
+                "poll_fixed_ms": self.poll_fixed_ms,
                 "poll_min_ms": self.poll_min_ms,
                 "logging_decoded": self.logging_decoded,
                 "log_decoded_file": self.log_decoded_file,

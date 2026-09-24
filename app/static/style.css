@@ -102,12 +102,23 @@ a { color: var(--info); }
 .brand { font-weight: 700; font-size: 16px; letter-spacing: .2px; }
 /* Centred between the brand and the status pill. flex:1 rather than absolute
    positioning: on a 320 px phone the three have to share the bar, not overlap. */
+.cputemp-group {
+  flex: 1; min-width: 0; display: flex; align-items: center;
+  justify-content: center; gap: 5px;
+}
 .cputemp {
-  flex: 1; min-width: 0; text-align: center;
+  min-width: 0; text-align: center;
   font-size: 13px; font-weight: 600; color: var(--muted);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .cputemp.is-hot { color: var(--danger); }
+.fan-icon { flex: 0 0 auto; width: 16px; height: 16px; fill: var(--muted); }
+/* three speed tiers so "how fast" reads at a glance -- plain visible with no
+   class is the <=33%-of-max tier (static, not "off": [hidden] already covers
+   that); renderFanIcon() picks the class from duty% or rpm/max_rpm */
+.fan-icon--slow { animation: fan-spin 2.4s linear infinite; }
+.fan-icon--fast { animation: fan-spin 0.7s linear infinite; }
+@keyframes fan-spin { to { transform: rotate(360deg); } }
 body.is-stale .cputemp { opacity: .45; }
 /* Three things now share the bar. Below 560 px the wordmark goes and the 🏍️
    still names the page, which is what the landscape query already does. */
@@ -567,6 +578,17 @@ label.is-dirty input, label.is-dirty select { border-color: var(--warn); }
 .diag-row > label.inline:first-child { flex: 1 1 auto; }
 .diag-row .diag-lim { flex: 0 0 auto; color: var(--muted); font-size: 13px; font-weight: 500; }
 .diag-row .diag-lim input { margin-top: 0; width: 96px; min-height: 38px; font-size: 15px; }
+/* The switch and the countdown it governs share a line: in the card corner the
+   number read as tied to nothing. */
+.power-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.power-row > label.inline { margin: 12px 0 0; }
+/* Content-sized, not the 50/50 split of .cfg-row2 -- these two only ever hold
+   a two-digit number (0 disables the step). One to each edge of the block, and
+   the box is wide enough that the spin arrows do not sit on the digits. */
+.power-timers { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; }
+.power-timers > label { flex: 0 0 auto; }
+.power-timers > label:last-child { text-align: right; }
+.power-timers input { display: inline-block; width: 76px; text-align: center; }
 
 .icon-del {
   width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
@@ -796,6 +818,17 @@ body.is-stale .ecu-banner { filter: grayscale(1); }
 .cpu-row { display: flex; gap: 10px; flex-wrap: wrap; }
 .cpu-row label { flex: 1 1 160px; }
 #cpuNow.is-hot { color: var(--danger); }
+/* fan tach probe result: a real GPIO with a working sensor lights up green */
+.fan-probe-ok { color: var(--accent); font-weight: 600; }
+.fan-probe-bad { color: var(--danger); }
+/* fan_type and tach_gpio are 1-2 digit numbers -- the shared 100%-width number
+   input rule stretches them wide enough that the spinner buttons crowd the
+   digit, so these two get a fixed, compact width instead */
+.fan-num-row { align-items: flex-end; }
+.fan-num { flex: 0 0 auto; }
+/* fan_type's own spinner buttons sit inside the input box, so a width sized
+   only to the widest value ("4") crowds the digit against them -- pad past it */
+.fan-num input[type=number] { width: 5.5em; }
 
 /* ---------- config: pending network changes ---------- */
 .dirty-bar {

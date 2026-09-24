@@ -283,15 +283,32 @@ def test_an_installed_addon_and_its_files_cross_the_swap():
 
 
 def test_a_stamped_build_outranks_the_bare_release_number():
-    """VERSION is the tracked number; BUILD adds the commit and the date and is
-    what deploy.sh / release.sh leave in an installed tree."""
+    """VERSION is the tracked number; BUILD adds the commit, the branch and the
+    date and is what deploy.sh / release.sh leave in an installed tree -- the
+    full string `_tree_version()` returns for the rollback record and the
+    terminal."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        (tmp / "t").mkdir()
+        (tmp / "t" / "VERSION").write_text("0.2.0\n")
+        assert U._tree_version(tmp / "t") == "0.2.0"
+        (tmp / "t" / "BUILD").write_text("0.2.0 66f5b2d main 2026-09-06 12:33\n")
+        assert U._tree_version(tmp / "t") == "0.2.0 66f5b2d main 2026-09-06 12:33"
+
+
+def test_the_ui_never_sees_the_commit_behind_a_release():
+    """Config -> System shows what a rider reads as "what firmware am I on" --
+    the release number alone. A stamped BUILD still carries the commit, branch
+    and date, but `.version()` -- what /api/update hands #updVersion -- trims to
+    just the first field, whether or not the tree was stamped."""
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         m = _mgr(tmp, py=_py_stub(tmp, {}))
         files = {**TREE, "VERSION": "0.2.0\n",
                  "BUILD": "0.2.0 66f5b2d main 2026-09-06 12:33\n"}
         assert _apply(m, _tar(tmp / "a.tar.gz", files))["result"] == "ok"
-        assert m.version()["version"] == "0.2.0 66f5b2d main 2026-09-06 12:33"
+        assert m.version()["version"] == "0.2.0"
+        assert "66f5b2d" not in m.version()["version"]
         (m.dest / "BUILD").unlink()          # a bare source tree, never stamped
         assert m.version()["version"] == "0.2.0"
 

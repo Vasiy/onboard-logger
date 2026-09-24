@@ -286,7 +286,7 @@ the maps straight away.
 
 ## Versioning
 
-- **`VERSION`** is tracked and bumped by hand — the release number, currently `0.2.3`.
+- **`VERSION`** is tracked and bumped by hand — the release number, currently `0.2.4`.
 - **`BUILD`** sits beside it, holds `<version> <describe> <branch> <date>`, is stamped by both
   `deploy.sh` and `release.sh`, and is **never committed**: a file the board generated inside its own
   tree would break `deploy.sh`'s checksum verification in both directions.

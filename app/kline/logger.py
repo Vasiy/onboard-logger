@@ -50,6 +50,7 @@ class KLineWorker(threading.Thread):
         self,
         *,
         port: str,
+        iface: str = "usb",
         params_path: str,
         log_dir: str = "/root/k-line",
         state,
@@ -73,6 +74,7 @@ class KLineWorker(threading.Thread):
         self._gear = GearReader(GearMap(gear_cfg or {}))
         self.diag = diag            # DiagLog or None; every call is best-effort
         self.port = port
+        self.iface = iface          # "usb" (FTDI adapter) or "uart1" (direct GPIO L9637D)
         self._ecu_fields = ecu_fields or DEFAULT_FIELDS
         self.params_path = params_path
         # a path, or a callable answering "where do I write now" (StorageManager)
@@ -209,9 +211,11 @@ class KLineWorker(threading.Thread):
     def resume(self) -> None:
         self._pause_req.clear()
 
-    def apply_kline(self, baud, echo=None, init=None) -> None:
-        """Apply K-Line settings (bus speed / echo / init mode) live — no reboot.
-        Drops the current link so the next attempt uses the new settings."""
+    def apply_kline(self, baud, echo=None, init=None, port=None, iface=None) -> None:
+        """Apply K-Line settings (bus speed / echo / init mode / interface) live —
+        no reboot. Drops the current link so the next attempt uses the new
+        settings; self.port is read fresh on every reconnect (run()), so
+        reassigning it here is enough to move to the other physical path."""
         self._auto_baud = str(baud).lower() == "auto"
         self._bauds = AUTO_BAUDS if self._auto_baud else [int(baud)]
         self._baud_idx = 0
@@ -219,6 +223,10 @@ class KLineWorker(threading.Thread):
             self.echo = bool(echo)
         if init is not None:
             self._init_slow = str(init).lower() == "slow"
+        if port is not None:
+            self.port = port
+        if iface is not None:
+            self.iface = iface
         self._reconnect.set()
 
     def reload_params(self) -> None:
@@ -712,6 +720,9 @@ class KLineWorker(threading.Thread):
                     describe(session.ecu_id_raw, session.ecu_hw, self._ecu_fields))
                 self.led.connected()
                 self.state.set_status("connected", ecu_id or "")
+                # the ECU answered ReadEcuId: proof it is there, which is what
+                # power save counts from (the status alternates on a dead bus)
+                self.state.set_link_seen()
                 self._link_at = time.monotonic()
                 self._last_fail = ""
                 # not emitted here: the file does not exist until the first log
@@ -719,6 +730,7 @@ class KLineWorker(threading.Thread):
                 self._link_ctx = {
                     "baud": baud, "init": "slow" if self._init_slow else "fast",
                     "ecu": (ecu_id or "?").split()[0] if ecu_id else "?",
+                    "iface": self.iface,
                 }
                 with self._lock:
                     scan = self._scan_on
@@ -736,7 +748,7 @@ class KLineWorker(threading.Thread):
                     self._last_fail = _friendly_error(exc)
                     self._diag("link_fail", err=type(exc).__name__,
                                detail=str(exc)[:100], baud=baud,
-                               tty=int(Path(self.port).exists()))
+                               tty=int(Path(self.port).exists()), iface=self.iface)
                 self.state.set_status("error", _friendly_error(exc))
                 self.state.set_ecu_fields({})   # drop the ECU banner on disconnect
                 self.state.set_ecu_desc("")
@@ -754,7 +766,7 @@ class KLineWorker(threading.Thread):
                                err=type(err).__name__ if err else "clean",
                                detail=(str(err)[:100] if err else ""),
                                up=round(time.monotonic() - self._link_at, 1),
-                               tty=int(Path(self.port).exists()))
+                               tty=int(Path(self.port).exists()), iface=self.iface)
                 self._close_all_logs()  # never keep logging once the link ends
             # rotate to the next candidate rate only if the initial link failed
             if not connected and self._auto_baud:
@@ -810,17 +822,22 @@ class KLineWorker(threading.Thread):
             probes: list[dict] = []
             cache: dict[tuple[int, bool], dict] = {}   # dedupe params sharing an rli
             got_any = False
+            bus_s = 0.0     # wire time only: the half of a cycle that scales with n
             for p in to_poll:
                 if self._reconnect.is_set() or self._pause_req.is_set():
                     return
                 key = (p.rli, p.with_addr)
                 r = cache.get(key)
                 if r is None:
+                    t_req = time.monotonic()
                     r = session.read_local(p.rli, with_addr=p.with_addr, timeout=timeout)
+                    bus_s += time.monotonic() - t_req
                     cache[key] = r
                     probes.append(r)
                     self._stat[r["status"]] = self._stat.get(r["status"], 0) + 1
                 if r["status"] == "ok":
+                    if not got_any:
+                        self.state.set_link_seen()   # the ECU is still there
                     got_any = True
                     values[p.key] = p.decode(bytes.fromhex(r["data"]))
                 else:
@@ -860,8 +877,13 @@ class KLineWorker(threading.Thread):
             session.keepalive_if_idle(1.0)
 
             elapsed = time.monotonic() - t0
-            # `probes` is the deduped request list, so this is the per-request cost
-            self.state.set_poll_cost(elapsed, len(probes))
+            # `probes` is the deduped request list, so `bus_s / len(probes)` is the
+            # per-request cost and the remainder is what the cycle costs whatever
+            # the selection. A cycle nobody answered prices nothing: its bus time is
+            # all timeouts and it also ran TesterPresent, which is a link check
+            # rather than a request, and neither belongs in the price of a live set.
+            if got_any:
+                self.state.set_poll_cost(bus_s, len(probes), elapsed - bus_s)
             if elapsed < interval:
                 self._stop_event.wait(interval - elapsed)
 

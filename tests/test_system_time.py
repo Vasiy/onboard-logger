@@ -11,6 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from app.web import rtc  # noqa: E402
 from app.web import system  # noqa: E402
 
 
@@ -74,6 +75,59 @@ def test_auto_sync_leaves_an_ntp_synced_board_alone():
         res = system.auto_sync(time.time() + 20 * 3600)
         assert res["skipped"] == "ntp"
         assert system.ran == []
+
+
+def test_auto_sync_leaves_a_board_on_a_hardware_rtc_alone():
+    """Same argument as the NTP one, stronger: a battery-backed module holds the
+    date across a power-off, and a phone minutes out of step with it is the
+    clock more likely to be wrong."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _fake(tmp)
+        system.auto_sync(time.time() + 3600, rtc_trusted=True)
+        system.ran.clear()
+        res = system.auto_sync(time.time() + 20 * 3600, rtc_trusted=True)
+        assert res["skipped"] == "rtc", res
+        assert system.ran == []
+        # and with no module the same drift still rescues the clock
+        system.ran.clear()
+        res = system.auto_sync(time.time() + 20 * 3600)
+        assert res.get("skipped") is None and any("set-time" in c for c in system.ran)
+
+
+def test_the_sync_button_writes_the_module_when_the_board_runs_off_it():
+    """Correcting only the running clock lasts until the next boot: hctosys
+    would put the module's own idea of the time straight back."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _fake(tmp)
+        rtc.DEV_ROOT = Path(tmp) / "dev"
+        res = system.set_time(time.time() + 3600, rtc_dev="rtc1")
+        assert res["ok"], res
+        assert any(c.startswith("hwclock -w -f ") and c.endswith("/dev/rtc1")
+                   for c in system.ran), system.ran
+        # and with no device named, nothing is written to any clock but the system one
+        system.ran.clear()
+        system.set_time(time.time() + 3600)
+        assert not any("hwclock" in c for c in system.ran), system.ran
+
+
+def test_a_module_that_refused_the_write_is_not_reported_as_a_clean_sync():
+    """The running clock is right either way, but on a board living off the
+    module the write is the half that survives the next boot -- a green banner
+    over a module that was not written is the worst of the two answers."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _fake(tmp)
+        rtc.DEV_ROOT = Path(tmp) / "dev"
+        real = system._run_err
+        system._run_err = lambda cmd: (
+            (False, "hwclock: cannot access the Hardware Clock")
+            if cmd[0] == "hwclock" else real(cmd))
+        try:
+            res = system.set_time(time.time() + 3600, rtc_dev="rtc1")
+        finally:
+            system._run_err = real
+        assert res["ok"] is False, res
+        assert "hwclock" in res["detail"], res
+        assert not any(a.startswith("rtc ") for a in res["applied"]), res["applied"]
 
 
 def test_auto_sync_skips_when_already_on_time():

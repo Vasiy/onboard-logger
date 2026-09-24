@@ -299,7 +299,7 @@ zeigen* zeichnet sofort.
 
 ## Versionierung
 
-- **`VERSION`** ist versioniert und wird von Hand erhöht — die Ausgabenummer, derzeit `0.2.3`.
+- **`VERSION`** ist versioniert und wird von Hand erhöht — die Ausgabenummer, derzeit `0.2.4`.
 - **`BUILD`** liegt daneben, enthält `<version> <describe> <branch> <datum>`, wird von `deploy.sh`
   wie von `release.sh` gestempelt und **nie eingecheckt**: eine Datei, die das Board in seinem
   eigenen Baum erzeugt hat, würde die Prüfsummenkontrolle von `deploy.sh` in beide Richtungen

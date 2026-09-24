@@ -65,10 +65,11 @@ def test_kmsg_filter():
 def test_event_line():
     with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as root:
         d = _diag(tmp, root)
-        d.event("link_down", err="SerialException", up=231.4, tty=0)
+        d.event("link_down", err="SerialException", up=231.4, tty=0, iface="usb")
         text = Path(d.current_file()).read_text()
         assert "LINK_DOWN" in text
         assert "err=SerialException" in text and "up=231.4" in text and "tty=0" in text
+        assert "iface=usb" in text
 
 
 def test_kmsg_line_keeps_its_spaces():

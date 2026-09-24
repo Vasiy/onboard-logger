@@ -365,9 +365,9 @@ class DiagLog:
     def _roll_day_locked(self) -> None:
         """Let go of a file whose day folder is no longer today's.
 
-        The folder moves under an open file at midnight, and — with no RTC on
-        this board — whenever the clock is finally corrected mid-ride by a phone
-        or a time server. The ride logs follow it; the log that explains them
+        The folder moves under an open file at midnight, and — on a board with no
+        battery-backed module wired on — whenever the clock is finally corrected
+        mid-ride by a phone or a time server. The ride logs follow it; the log that explains them
         has to as well, or the two end up a day apart. Closing is enough: the
         next line opens the file where it belongs.
         """

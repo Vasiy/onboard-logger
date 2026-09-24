@@ -39,7 +39,7 @@ const SNAP = (selected, over = {}) => ({
   scan_on: false, scan_total: 0, scan_pos: 0, scan_alive: 0, scan_remaining: -1, scan_sweeps: 0,
   wifi_mode: "ap", wifi_link: {}, ap_channel: 6,
   test_mode: false, test_mode_detail: "", act_key: "", act_lid: 0, act_until: 0,
-  poll_req_ms: 0, poll_min_ms: 150,
+  poll_req_ms: 0, poll_fixed_ms: 0, poll_min_ms: 150,
   values: {}, values_ts: 0, catalog: CAT, selected,
   presets: [{ name: "", keys: [] }, { name: "", keys: [] }, { name: "", keys: [] }], ...over,
 });

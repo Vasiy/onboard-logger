@@ -20,7 +20,17 @@
     <div class="brand">🏍️<span class="brand__text"> Onboard Logger</span></div>
     <!-- The board has no fan and idles ~5 C under its first thermal trip, so the
          temperature belongs where it is seen without looking for it. -->
-    <div id="cpuTemp" class="cputemp" title="" hidden></div>
+    <div class="cputemp-group">
+      <div id="cpuTemp" class="cputemp" title="" hidden></div>
+      <!-- Material Symbols "mode_fan" glyph, inlined rather than linked from
+           Google Fonts: this page has to work on the board's own AP, which
+           has no route to the internet -- a webfont request there would just
+           hang/fail. Shown only while the fan is actually driven (duty > 0);
+           hidden with no fan configured or duty at 0. -->
+      <svg id="fanIcon" class="fan-icon" viewBox="0 -960 960 960" aria-hidden="true" hidden>
+        <path d="M424-80q-51 0-77.5-30.5T320-180q0-26 11.5-50.5T367-271q22-14 35.5-36t18.5-47l-12-6q-6-3-11-7l-92 33q-17 6-33 10t-33 4q-63 0-111.5-55T80-536q0-51 30.5-77.5T179-640q26 0 51 11.5t41 35.5q14 22 36 35.5t47 18.5l6-12q3-6 7-11l-33-92q-6-17-10-33t-4-32q0-64 55-112.5T536-880q51 0 77.5 30.5T640-781q0 26-11.5 51T593-689q-22 14-35.5 36T539-606l12 6q6 3 11 7l92-34q17-6 32.5-9.5T719-640q81 0 121 67t40 149q0 51-32 77.5T777-320q-25 0-48.5-11.5T689-367q-14-22-36-35.5T606-421l-6 12q-3 6-7 11l33 92q6 16 10 30.5t4 30.5q1 65-54 115T424-80Zm56-340q25 0 42.5-17.5T540-480q0-25-17.5-42.5T480-540q-25 0-42.5 17.5T420-480q0 25 17.5 42.5T480-420Zm-46-192q6-2 12.5-3.5T459-618q8-42 30.5-78t59.5-60q5-4 8-10t3-15q0-8-6-13.5t-18-5.5q-38 0-86 16.5T400-719q0 9 2.5 17t4.5 15l27 75ZM240-400q14 0 33-7l75-27q-2-6-3.5-12.5T342-459q-42-8-78-30.5T204-549q-4-5-10.5-8t-14.5-3q-9 0-14 6t-5 18q0 54 20.5 95t59.5 41Zm184 240q47 0 92.5-19t43.5-66q0-8-2.5-15t-4.5-13l-27-75q-6 2-12.5 3.5T501-342q-8 42-30.5 78T411-204q-5 4-8.5 10.5T400-180q1 8 6 14t18 6Zm353-240q9 0 16-5t7-19q0-38-16-86.5T719-560q-9 0-17 2t-15 4l-75 28q2 6 3.5 12.5T618-501q42 8 78 30.5t60 59.5q3 5 9 8t12 3ZM618-501ZM459-618ZM342-459Zm159 117Z"/>
+      </svg>
+    </div>
     <div id="statusPill" class="pill pill--init">
       <span class="dot"></span>
       <span id="statusText">…</span>
@@ -482,6 +492,12 @@
         <fieldset class="card">
           <legend data-i18n="cfg.kline">K-Line bus</legend>
           <div class="cfg-row2">
+            <label><span data-i18n="cfg.klineIface">Interface</span>
+              <select name="kline.iface">
+                <option value="usb" data-i18n="opt.klineUsb">USB adapter</option>
+                <option value="uart1" data-i18n="opt.klineUart1">UART1 (GPIO)</option>
+              </select>
+            </label>
             <label><span data-i18n="cfg.baud">Bus speed</span>
               <select name="kline.baud">
                 <option value="auto" data-i18n="opt.auto">Auto</option>
@@ -526,9 +542,22 @@
               </div>
               <button type="button" id="timeSyncBtn" class="mini" data-i18n="cfg.timeSync">Sync from this device</button>
             </div>
+            <!-- Only shown when a battery-backed module was actually found. The
+                 SoC/PMIC clock answers too and knows nothing, so the block is
+                 hidden rather than offering a choice between two liars. Two named
+                 states, not a plain on/off, so it is the segmented control this
+                 app already uses for read/pick and the log filters, not a
+                 checkbox-styled switch. -->
+            <div id="rtcBox" hidden>
+              <div class="card__head" style="margin:0 0 6px"><span data-i18n="cfg.rtcSource">Clock source</span></div>
+              <div class="seg" id="rtcSource">
+                <button type="button" data-src="web" data-i18n="opt.rtcWeb">Connected device</button>
+                <button type="button" data-src="rtc" data-i18n="opt.rtcHw">Hardware RTC</button>
+              </div>
+            </div>
             <label class="inline"><input name="system.auto_time_sync" type="checkbox" />
               <span data-i18n="cfg.autoTime">Set the clock from the first client after power-up</span></label>
-            <p class="hint" data-i18n="cfg.autoTimeHint">The board has no battery-backed clock. With this on, the first browser that opens the UI after a power-up sets the date, time and timezone — once per power-up, and only if the two clocks differ by more than 2 s.</p>
+            <p class="hint" id="autoTimeHint" data-i18n="cfg.autoTimeHint">The board has no battery-backed clock. With this on, the first browser that opens the UI after a power-up sets the date, time and timezone — once per power-up, and only if the two clocks differ by more than 2 s.</p>
             <!-- timezone, drift, NTP and where the once-per-power-up shot stands:
                  too long for the block title, so it closes the block instead -->
             <div id="timeMeta" class="hint">—</div>
@@ -549,6 +578,60 @@
                 <select id="cpuMax"></select></label>
             </div>
             <p class="hint" data-i18n="cfg.cpuHint">The load never reaches one core, so a lower ceiling costs nothing measurable and keeps the board further from the temperature at which the kernel starts cutting the clock on its own. An empty value leaves the kernel default alone. The setting is re-applied on every boot.</p>
+          </div>
+          <!-- Counted from the last time the ECU *answered*, never from the
+               status: with no adapter that alternates searching/error every two
+               seconds and would reset the timer forever. -->
+          <div class="update-box">
+            <div class="card__head"><span data-i18n="cfg.powerSave">Power save</span></div>
+            <!-- the countdown sits beside the switch it belongs to, not off in
+                 the card's corner where it read as a number tied to nothing -->
+            <div class="power-row">
+              <label class="inline"><input name="system.power_save.enabled" type="checkbox" />
+                <span data-i18n="cfg.powerSaveOn">Wind down with no ECU</span></label>
+              <span id="powerSaveNow" class="hint"></span>
+            </div>
+            <div class="power-timers">
+              <label><span data-i18n="cfg.powerSaveIdle">slow down after, min</span>
+                <input name="system.power_save.idle_min" type="number" min="0" max="99" step="1" /></label>
+              <label><span data-i18n="cfg.powerSaveOff">then off after, min</span>
+                <input name="system.power_save.off_min" type="number" min="0" max="99" step="1" /></label>
+            </div>
+            <p class="hint" data-i18n="cfg.powerSaveHint">With the ignition off the board keeps looking for the ECU every two seconds and drains the battery. The first step drops the processor to its lowest speed; the second powers the board off, and needs the ignition turned on again. Both are cancelled the moment the ECU answers. The poweroff waits while a browser has this page open, while a firmware operation or a scan runs, and while a ride log is being written — the slow-down never waits for anything.</p>
+          </div>
+          <!-- PWM duty is driven from this board's own CPU temperature at 1 Hz
+               (app/web/fan.py, FanController) -- in this process, not a
+               separate service, so it ships through Update like any other
+               feature instead of needing code execution from an Add-ons
+               upload (which this board never does, by design). -->
+          <div class="update-box">
+            <div class="card__head"><span data-i18n="cfg.fan">Fan</span>
+              <span id="fanNow" class="hint">—</span>
+            </div>
+            <label class="inline"><input name="fan.enabled" type="checkbox" />
+              <span data-i18n="cfg.fanEnabled">Control the fan</span></label>
+            <div class="cpu-row fan-num-row">
+              <label class="fan-num"><span data-i18n="cfg.fanType">Wiring</span>
+                <input name="fan.fan_type" type="number" min="2" max="4" step="1" /></label>
+              <label class="fan-num"><span data-i18n="cfg.fanTachGpio">Tach GPIO</span>
+                <select id="fanTachGpio"></select></label>
+              <button type="button" id="fanProbeBtn" class="mini" data-i18n="cfg.fanProbe">Probe</button>
+            </div>
+            <p class="hint" data-i18n="cfg.fanTypeHint">2: temperature only, no tach. 3: tach shares the 2-pin connector's own chopped power — only accurate at 100% duty. 4: dedicated PWM + tach line — accurate at any duty.</p>
+            <p id="fanProbeResult" class="hint"></p>
+            <label><span data-i18n="cfg.fanFreqLabel">PWM frequency</span>
+              <span class="range-row">
+                <input type="range" id="fanFreqSlider" min="0" max="100" step="1" />
+                <output id="fanFreqValue" for="fanFreqSlider"></output>
+              </span>
+            </label>
+            <label class="inline"><input name="fan.log" type="checkbox" />
+              <span data-i18n="cfg.fanLog">Log RPM to the board's diagnostics log</span></label>
+            <!-- Full explanation (pull-up wiring, Probe's behaviour, what
+                 unticking Control the fan above actually does) moved to
+                 README.md/README.ru.md's Fan control paragraph -- the
+                 settings page was getting crowded, and cfg.fanHint's text
+                 (kept in i18n.js, just unused here) is that same content. -->
           </div>
           <!-- Every writer asks StorageManager where to write at each file open,
                so this one choice moves the rides, the board's diagnostics and the

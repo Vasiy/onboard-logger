@@ -295,7 +295,7 @@ meteen tekent.
 
 ## Versies
 
-- **`VERSION`** wordt door git gevolgd en met de hand opgehoogd — het uitgavenummer, nu `0.2.3`.
+- **`VERSION`** wordt door git gevolgd en met de hand opgehoogd — het uitgavenummer, nu `0.2.4`.
 - **`BUILD`** staat ernaast, bevat `<versie> <describe> <tak> <datum>`, wordt door zowel `deploy.sh`
   als `release.sh` gestempeld en wordt **nooit gecommit**: een bestand dat het board in zijn eigen
   boom had gemaakt zou de controlesomverificatie van `deploy.sh` in beide richtingen breken.
