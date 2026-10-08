@@ -109,50 +109,57 @@ lambdas oscillating):
 | 0x32 | Air temp       | raw − 40       | °C   | ~ambient |
 | 0x33 | Coolant temp   | raw − 40       | °C   | rises on warm-up |
 | 0x34 | Throttle       | raw / 10       | °    | idle ~1.8° |
-| 0x35 | Advance (latched)| raw / 10     | °    | 20.0° at warm idle; freezes at its last value with the engine stopped |
-| 0x37 | Advance (live) | raw / 10       | °    | the same value while running; a fixed 8.0° whenever the engine is not turning |
+| 0x35 | Advance (latched)| raw / 10     | °    | signed; 20.0° at warm idle; freezes at its last value with the engine stopped |
+| 0x37 | Advance (live) | raw / 10       | °    | signed; the same value while running; a fixed 8.0° whenever the engine is not turning |
 | 0x39 | Injection      | raw / 1000     | ms   | 0 stopped, 8.6 ms cranking, ~1.4 ms at warm idle |
 | 0x3A | Idle target    | raw            | rpm  | target idle vs temp: 1571 cold → 1401 warm (matches the ECU map) |
 | 0x3C | Battery        | raw / 10       | V    | 11.9–14.1 V |
 | 0x45 | Lambda F (front)| raw           | mV   | oscillates (closed loop) |
-| 0x46 | Lambda R (rear) | raw           | mV   | 2nd lambda; a constant zero on images that stub it |
 | 0x47 | Lambda integrator F | raw / 10  | %    | signed 16-bit, −18…+25 % |
-| 0x48 | Lambda integrator R | raw / 10  | %    | signed 16-bit; a constant zero on images that stub it |
 | 0x4B | Lambda phase F | raw            | —    | 1 frozen, 2 cold sensor, 3/4 open loop, 5 closed loop leaning out, 7 closed loop enriching |
 | 0x53 | Road speed     | raw            | km/h | 0 standing, 87 at the 8384 rpm limiter in second; rpm/speed gives the gear |
+| 0x6A | Throttle bypass correction | raw / 10 | ° | the idle-stepper air expressed as throttle angle and added to 0x34; 0 in the closed zone, 0–2.9° off it, falling as the stepper closes on warm-up |
 | 0x6B | Idle stepper base | raw         | steps| temperature-scheduled: 117 at 51 °C, 100 from 75 °C up |
 | 0x6C | Idle stepper position | raw     | steps| 0x6B + 0x6D; the sum is exact in 83 % of samples and within ±2 in 99 % |
 | 0x6D | Idle stepper trim | raw         | steps| signed; the closed-loop offset carried on top of 0x6B |
 
 Cylinders are **F/R (front/rear)** per Moto Guzzi / Ducati / Moto Morini V-twin layout.
 Further named channels carry a decoder from `config/status_maps.json`: 0x49 the lambda loop flag
-(0 open, 2 closed), 0x58 the engine-state bitfield (0x01 closed throttle, 0x02 after-start phase over,
-0x04 engine turning), 0x61 the neutral flag, 0x76 the side stand and 0x78 the clutch. 0x54 / 0x55 are a
+(0 open, 2 closed), 0x58 the fuelling mode (an enum, not a bitfield: 0 stopped, 1 cranking, 2 running, 3 deceleration,
+4 acceleration, 5 idle, 6–9 the same four with fuel cut-off armed, 10 cut-off, 11 fuel return), 0x5C the
+throttle zone (1 closed, 4 part throttle, 2 wide open — edges at the learned stops, with hysteresis),
+0x6E the coolant overheat flag (above 109 °C with the engine running), 0x70 the fan bits (0x01/0x02
+fan outputs, 0x04 both, 0x08/0x10 the two requests; on from 98 °C), 0x61 the neutral flag, 0x76 the side stand and 0x78 the clutch. 0x54 / 0x55 are a
 coil charge time compensated for battery voltage; the count stays raw.
 
-Five more identifiers carry a state rather than a measurement. **0x7A and 0x79 are one input reported
-twice**, strictly inverse across every sample where both were read; 0x7A stands at 1 whenever the
-engine runs and flips to 1 in the sample the starter engages, which reads as the kill switch, RUN on
-0x7A and STOP on 0x79. **0x57 is a stop-state code**: 4 while the engine runs, 8 once it has stopped,
-and 16 both at the instant of one stop and some 18 s after another. **0x62** is 0 stopped, 4 at idle
-and 2 off idle, flickering between the two around 1300–1700 rpm on a closed throttle. **0x5C** carries
-the same closed-throttle decision as 0x58's 0x01 bit, coded 1 shut and 4 open, and is read a request
-earlier. **0x75** goes to 1 in the sample the starter engages and stays there while the engine runs.
+Five more identifiers carry a state rather than a measurement. **0x79 is the kill switch** (1 = STOP)
+and **0x7A the run enable** the ECU works out from its inputs: on the bike it has followed the kill switch, inverted,
+but it also drops with the side stand down and a gear engaged, and with 0x77 at 0. **0x57 is the engine
+state**: 1 power-up, 2 ignition on and not turning, 4 running, 8 stopped with the ignition on, 0x40 the
+ignition switched off while turning, 0x10 ignition off and waiting, 0x20 the shutdown that saves the
+learned data. **0x62** is 0 stopped, 4 at idle
+and 2 off idle, flickering between the two around 1300–1700 rpm on a closed throttle. **0x75** is
+crank synchronisation: it goes to 1 in the sample the starter engages and stays there while the engine
+runs.
 
 **38 of the 79 answer a constant zero.** The image serves them from three shared slots — one for a
 2-byte zero, one for a 1-byte zero, one for the two 3-byte identifiers — so there is no variable
 behind them and no condition that makes them move: 0x31, 0x36, 0x38, 0x3B, 0x3F–0x44, 0x46, 0x48,
 0x4A, 0x4C, 0x4D, 0x4E, 0x50–0x52, 0x56, 0x59–0x5B, 0x64–0x69, 0x6F, 0x71–0x73 and 0x7B–0x7F. The
-four in that list that name the rear bank (0x46, 0x48, 0x4A, 0x4C) are stubbed on this image; other
-builds of the same ECU wire a second sensor. Of the 41 identifiers that have a slot of their own,
-24 are the named channels above, 11 more are named but not yet proven on a bike, and 6 carry no
-established meaning at all: 0x3E (a config/ID byte, a constant 52 through a whole cold start), 0x5D,
-0x5E, 0x5F, 0x63 (a flat zero through the rev limiter, full throttle and a warm-up to 97 °C) and
-0x6A (0 at closed throttle and flat out alike, 5..21 on a moderate steady throttle).
+four in that list that would carry the rear bank (0x46, 0x48, 0x4A, 0x4C) are stubbed in every Moto
+Morini image; Ducati software on the same ECU wires them. Of the 41 identifiers that have a slot of
+their own, two are held constant by every Granpasso calibration — 0x74 (the immobilizer is off) and
+0x63 (a PWM output that is not used). Three depend on the build: 0x5D, 0x5E, 0x5F are the learned
+fuel trims (idle, part load, multiplicative; signed), live where learning is enabled, and 0x3D is the
+CO trim — held by the lambda loop on closed-loop builds, set by hand with a tester on open-loop ones.
+Two more are inputs not yet seen to move: 0x3E, an analog input that reads
+52, the bottom of its conversion table, and 0x77, an input that blocks the engine at 0 and has read 1
+throughout.
 
 `config/params.json` schema: `{key, name, rli, fmt(2/0), offset, length, endian, signed, scale,
 bias, recip, digits, default, group, map, map_type, dead}`. `dead` marks an identifier served by one
-of those shared zero slots: the record stays, but nothing may select it. `recip != 0` → `value = recip / raw` (period-style). `default`
+of those shared zero slots, or one the calibration holds constant: the record stays, but nothing may
+select it. `recip != 0` → `value = recip / raw` (period-style). `default`
 = selected for the decoded log at startup (named channels on, unidentified off). The worker polls
 **only selected** params, so fewer selected = higher poll rate.
 
@@ -233,8 +240,12 @@ writing any other size is blocked. Read ≈ 20 min. ⚠ Writing risks bricking t
 
 Decoders shipped in `config/status_maps.json` (attach to a status rli once identified):
 
-- **motorstate** (bits): 01 Power-On/engine off, 02 Ignition on/engine off, 04 Engine running,
-  08 Stalling, 10 Power-Latch active, 20 Power-Latch ended.
+- **fuel_mode** (enum, 0x58): 0 stopped … 5 idle … 7 idle with cut-off armed … 10 cut-off,
+  11 fuel return.
+- **runstate** (enum, 0x57): 01 power-up, 02 ignition on, 04 running, 08 stopped, 10 ignition off,
+  20 shutdown, 40 ignition off while turning.
+- **throttle_zone** (enum, 0x5C): 01 closed, 02 wide open, 04 part throttle.
+- **fans** (bits, 0x70): 01 fan 2, 02 fan 1, 04 both, 08 fan 1 requested, 10 fan 2 requested.
 - **motor** (cut-off bits, 16-bit): 0001 Crank … 0040 Steady running … 0400 In cut-off …
   2000 Exit cut-off (accel).
 - **tps_state** (bits): 01 min, 02 full open, 04 mid.

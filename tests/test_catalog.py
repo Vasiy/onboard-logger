@@ -34,36 +34,61 @@ def _selectable():
     return ParamMap.load(ROOT / "config" / "params.json").selectable()
 
 
-def test_the_2026_09_10_ride_named_four_channels():
-    """0x75, 0x62, 0x5C and 0x6A stopped being raw rli that day."""
-    for key, group, mp in (("engine_run", "known", "onoff"),
-                           ("idle_mode", "known", "idle_mode"),
-                           ("warmup_on", "check", "warmup_on"),
-                           ("warmup_enrich", "check", "")):
+def test_the_named_channels_carry_the_names_the_firmware_gives_them():
+    """0x75 and 0x62 were named by the 2026-09-10 ride; 0x5C, 0x6A and 0x58 were
+    renamed, and 0x6E and 0x70 named, by the 2026-10-08 read of the code behind
+    each slot."""
+    for key, rli, group, mp in (("engine_run", 0x75, "known", "onoff"),
+                                ("idle_mode", 0x62, "known", "idle_mode"),
+                                ("throttle_zone", 0x5C, "known", "throttle_zone"),
+                                ("tps_bypass", 0x6A, "known", ""),
+                                ("fuel_mode", 0x58, "known", "fuel_mode"),
+                                ("overheat", 0x6E, "check", "onoff"),
+                                ("fans", 0x70, "check", "fans")):
         p = BY_KEY.get(key)
         assert p, f"{key} is missing from params.json"
+        assert p["rli"] == rli, (key, hex(p["rli"]))
         assert p["group"] == group, (key, p["group"])
         assert p.get("map", "") == mp, (key, p.get("map"))
-    for gone in ("r75", "r62", "r5c", "r6a"):
+        assert not p.get("dead"), f"{key} has code behind it"
+    for gone in ("r75", "r62", "r5c", "r6a", "warmup_on", "warmup_enrich",
+                 "engine_state", "r6e", "r70"):
         assert gone not in BY_KEY, f"{gone} was renamed; the old key must not linger"
+    assert "motorstate" not in MAPS and "warmup_on" not in MAPS
+    assert MAPS["fuel_mode"]["type"] == "enum", "0x58 is a mode number, not a bitfield"
 
 
-def test_the_six_flat_zero_rli_are_dead_and_the_constants_are_not():
-    """Dead is 'answers, but never says anything' — measured, not assumed.
+def test_advance_is_signed():
+    """A retarded spark is a negative angle; unsigned it would read ~6550 deg."""
+    for key in ("advance", "advance2"):
+        assert BY_KEY[key]["signed"] is True, key
 
-    0x5D/0x5E/0x5F/0x63/0x6E/0x70 held a flat 0 through a whole ride (limiter,
-    25 -> 96 C, 5375 rpm). 0x74/0x77 (const 1) and 0x3E (const 52) stay
-    selectable on purpose: a constant is not a zero, and none of the three has
-    ever been recorded with the ignition switched off, which is what the Sleep
-    preset is for.
+
+def test_stubs_and_calibration_constants_are_dead_and_the_rest_are_not():
+    """Dead is 'answers, but never says anything on this software'.
+
+    Two reasons qualify: the rli is served from a shared zero slot (no code
+    behind it -- the rear bank among them, stubbed in every Moto Morini image),
+    or every Granpasso calibration holds its source still (0x74, 0x63) -- each
+    such name says 'constant by calibration'. The learned trims 0x5D/0x5E/0x5F
+    and the CO trim 0x3D depend on the build and stay selectable, as do 0x77
+    (const 1) and 0x3E (const 52), live inputs not yet seen in every state.
     """
     sel = _selectable()
-    for key in ("r5d", "r5e", "r5f", "r63", "r6e", "r70"):
-        assert BY_KEY[key].get("dead") is True, f"{key} should be dead"
-        assert key not in sel, f"{key} is dead and must not be selectable"
-    for key in ("r74", "r77", "r3e"):
-        assert not BY_KEY[key].get("dead"), f"{key} is a constant, not a zero"
+    for key in ("lambda_r", "lambda_int_r", "lambda_reg_r", "lambda_ctl_r"):
+        assert BY_KEY[key].get("dead") is True, f"{key} is a stub"
+        assert key not in sel
+    for key in ("r74", "r63"):
+        p = BY_KEY[key]
+        assert p.get("dead") is True, f"{key} is constant by calibration"
+        assert "constant by calibration" in p["name"], f"{key} should say why"
+        assert key not in sel
+    for key in ("r77", "r3e", "co_trim", "adapt_idle", "adapt_part", "adapt_mult"):
+        assert not BY_KEY[key].get("dead"), f"{key} is live on some build"
         assert key in sel, f"{key} still has a state left to record"
+    for gone in ("r5d", "r5e", "r5f"):
+        assert gone not in BY_KEY, f"{gone} was renamed; the old key must not linger"
+    assert sum(1 for p in PARAMS["params"] if p.get("dead")) == 38 + 2
 
 
 def test_every_preset_key_is_a_channel_that_can_be_polled():
