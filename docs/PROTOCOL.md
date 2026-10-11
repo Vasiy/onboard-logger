@@ -278,6 +278,24 @@ built for aarch64): `10 85` StartDiagnosticSession → `27` SecurityAccess (seed
 → block transfer (`34`/`36`) + checksum. Image size is exactly **327680** bytes (0x50000);
 writing any other size is blocked. Read ≈ 20 min. ⚠ Writing risks bricking the ECU.
 
+Both directions start at 10400 and move the link before the transfer — on different rates and
+by different requests (frames with header and checksum stripped):
+
+| | request | source | rate | port set to |
+|---|---|---|---|---|
+| read | `10 0C 0C 09` | `0x01` | code 9 of the source-`0x01` table = 62500 | **64200** |
+| write | `10 85 03` | `0xF1` | code 3 = 38400 (§4.2) | **38400** |
+
+The read port sits at 64200 rather than 62500, which fits the ECU's integer divisor
+(`781250 / baud − 1`) being truncated: that lands on ≈ 65100, and 64200 is within ~1.4 % of it
+(rounded, it would be ≈ 60100). The same truncation puts the 38400 of §4.2 at ≈ 39060.
+
+The read then fetches 16 blocks of 16 KiB in 32-byte pieces (`36 21 00 <offset> 20`, after
+`36 11 00 FE 02 01 <block>` selects the block); blocks 2–5 are not read over the wire and are filled
+with `0xFF`. That is ~8192 requests in ~20 min, ≈ 146 ms each, of which ≈ 10 ms is wire time at
+64200 — the rest is the ECU answering. Effective throughput ≈ 220 B/s, and a faster line would
+barely move it.
+
 ## 10. Status bit-fields
 
 Decoders shipped in `config/status_maps.json` (attach to a status rli once identified):
