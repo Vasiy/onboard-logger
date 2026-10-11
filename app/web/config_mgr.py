@@ -51,6 +51,23 @@ def resolve_kline_port(cfg: dict) -> str:
     return cfg["kline"]["port"]
 
 
+# kline.baud is the rate the *session* runs at, raised after an init at 10400
+# (KWP2000Session.switch_baud) — the ECU never hears an init on anything else.
+# It used to be the rate the port opened at, with "auto" cycling candidates,
+# and every board in the field has one of those values in /etc: they all mean
+# "stay at 10400" now. Must match SESSION_BAUD_CODES plus 10400.
+SESSION_BAUDS = (10400, 19200, 38400, 57600)
+
+
+def session_baud(value) -> int:
+    """The session rate a kline.baud value asks for; anything unknown is 10400."""
+    try:
+        b = int(value)
+    except (TypeError, ValueError):
+        return SESSION_BAUDS[0]
+    return b if b in SESSION_BAUDS else SESSION_BAUDS[0]
+
+
 def _deep_merge(base: dict, over: dict) -> dict:
     out = copy.deepcopy(base)
     for k, v in over.items():
@@ -140,6 +157,9 @@ class ConfigManager:
         if self.config_path.exists():
             cfg = _deep_merge(cfg, json.loads(self.config_path.read_text()))
         _clamp_fan_period_ns(cfg)
+        kl = cfg.get("kline")
+        if isinstance(kl, dict):
+            kl["baud"] = session_baud(kl.get("baud"))
         return cfg
 
     def save(self, cfg: dict) -> None:
@@ -206,13 +226,15 @@ class ConfigManager:
         if not (len(country) == 2 and country.isalpha()):
             raise ConfigError("cfgerr.country")
 
-        baud = cfg.get("kline", {}).get("baud", "auto")
+        # "auto" is the old open-rate setting a page cached before the update
+        # may still send; load() reads it as 10400
+        baud = cfg.get("kline", {}).get("baud", SESSION_BAUDS[0])
         if str(baud).lower() != "auto":
             try:
                 b = int(baud)
             except (TypeError, ValueError):
                 raise ConfigError("cfgerr.baud_kind")
-            if not (300 <= b <= 115200):
+            if b not in SESSION_BAUDS:
                 raise ConfigError("cfgerr.baud_range")
 
         # which physical path K-Line rides on: the USB/FTDI adapter (port,

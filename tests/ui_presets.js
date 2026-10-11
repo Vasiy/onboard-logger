@@ -264,9 +264,40 @@ test("with no live bus the price falls back to the wire arithmetic", async () =>
   // wire there is no fixed half to believe either, and it must not leak in.
   sb.applySnapshot(SNAP({ poll_min_ms: 10, poll_fixed_ms: 200 }));
   await tap(sb, 0);
-  // 2 requests x 13.5 ms of wire at 10400 8N1 = 27 ms -> 37 Hz
-  assert(sb.document.querySelector("#presetCost").textContent === "≈ 37.0 Hz · 2 requests",
+  // 2 requests x 13.46 ms of wire at 10400 8N1 (14 bytes x 10 bits) = 26.9 ms -> 37.1 Hz
+  assert(sb.document.querySelector("#presetCost").textContent === "≈ 37.1 Hz · 2 requests",
          "got " + sb.document.querySelector("#presetCost").textContent);
+});
+
+test("the price follows the bus speed Config asks for", async () => {
+  const sb = await sandbox("edit");
+  const cost = () => sb.document.querySelector("#presetCost").textContent;
+  // nothing measured: wire only, 14 bytes x 10 bits at 38400 = 3.65 ms a request
+  sb.applySnapshot(SNAP({ poll_min_ms: 1, bus_target: 38400 }));
+  await tap(sb, 0);                              // two distinct rli
+  assert(cost() === "≈ 137.1 Hz · 2 requests", "got " + cost());
+  // measured at 10400: the 13.46 ms of wire in those 60 ms is swapped for 3.65,
+  // the ECU's own delay -- the bulk of a request -- is not touched
+  sb.applySnapshot(SNAP({ poll_min_ms: 10, poll_req_ms: 60, poll_cost_baud: 10400,
+                          bus_target: 38400 }));
+  assert(cost() === "≈ 10.0 Hz · 2 requests", "got " + cost());
+  // measured at the rate asked for: taken as it is
+  sb.applySnapshot(SNAP({ poll_min_ms: 10, poll_req_ms: 60, poll_cost_baud: 38400,
+                          bus_target: 38400 }));
+  assert(cost() === "≈ 8.3 Hz · 2 requests", "got " + cost());
+});
+
+test("Bus speed shows the rate the session runs at, and why it is not the one asked for", async () => {
+  const sb = await sandbox();
+  const baud = sb.document.querySelector("#busBaud"), note = sb.document.querySelector("#busNote");
+  sb.applySnapshot(SNAP({ bus_baud: 38400, bus_target: 38400 }));
+  assert(baud.textContent === "38400 baud" && note.hidden === true, baud.textContent);
+  sb.applySnapshot(SNAP({ bus_baud: 10400, bus_target: 38400, bus_note: "bus.refused" }));
+  assert(baud.textContent === "10400 baud", baud.textContent);
+  assert(note.hidden === false && note.textContent === "38400 refused by the ECU", note.textContent);
+  sb.applySnapshot(SNAP({ status: "searching", bus_baud: 10400, bus_target: 38400,
+                          bus_note: "bus.refused" }));
+  assert(note.hidden === true, "a note about a link that is not there says nothing");
 });
 
 test("the price and all/none are pick-mode tools, gone in read mode", async () => {

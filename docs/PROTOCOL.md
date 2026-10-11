@@ -59,9 +59,9 @@ session by itself.
 <- C2 ...
 ```
 
-The live-data path does **not** send `10 85` StartDiagnosticSession or `1A` ReadEcuId — the
-IAW 5AM rejects `10 85` with NRC 0x22 (conditionsNotCorrect). (ReadEcuId `1A 80` is used once,
-separately, for the identity block — see §8.)
+The poll itself needs no StartDiagnosticSession and no `1A` ReadEcuId. (ReadEcuId `1A 80` is
+used once, separately, for the identity block — see §8; `10 85 <code>` only ever moves the
+session to a faster rate — §4.2.)
 
 ### 4.1 Diagnostic session (required by §6 and §7)
 
@@ -80,11 +80,48 @@ The answers to `83` and `10 81` are not checked — they are sent and ignored.
 
 **There is no separate "enter test mode" command on the 5AM**: `31 21`, `30 7E 04` and
 `30 <lid> 07/00` are ordinary services inside that session, and service `0x10` appears nowhere
-but the bring-up. A "test mode" is a convention of the user interface, not a state of the ECU:
+but the bring-up and the rate change of §4.2. A "test mode" is a convention of the user interface, not a state of the ECU:
 parameter polling keeps running while a test does.
 
 The logger arms this session **lazily, before the first Testing command**
 (`KWP2000Session.enter_test_mode`), since `21 <rli>` works in the default session anyway.
+
+### 4.2 Session baud rate
+
+An init is only heard at 10400. Once the link is up, `10 85 <code>` moves it to another rate:
+
+| code | baud | | code | baud |
+|---|---|---|---|---|
+| 1 | 9600 | | 4 | 57600 |
+| 2 | 19200 | | 5 | 115200 |
+| 3 | 38400 | | 6 | NRC 0x10 |
+| | | | 7 | 38400 |
+
+```
+-> 10 85 03               StartDiagnosticSession 0x85, rate code 3
+<- 50 85                  still at 10400; the ECU re-rates after this answer
+   (tester re-rates its port, waits ~P3min)
+-> 3E                     TesterPresent at 38400 — any answer proves the new rate
+<- 7E
+```
+
+- **Conditions.** The ECU agrees only with the engine stopped, the bike standing and the
+  supply between 10.0 and 15.5 V; otherwise it answers `7F 10 22` (conditionsNotCorrect) and
+  stays where it was. The rate, once set, holds for the session — starting the engine
+  afterwards does not drop it — but a new init is back at 10400.
+- **`10 81` resets it.** The standard diagnostic session (§4.1) runs at 10400, so arming it
+  for a Testing command drops a raised link back.
+- **Divisor.** The ECU's UART divides 781250 by an integer (`781250 / baud − 1`), so the upper
+  rates land off nominal: 19200 and 38400 ≈ +1.7 %, 57600 ≈ +4.3 %, 115200 ≈ +13 % — beyond
+  what a UART tolerates. The logger offers 10400 (no change), 19200, 38400 and 57600
+  (experimental).
+- **Gain.** A request is 6 bytes out and 8 back: 13.5 ms of wire at 10400, 3.6 ms at 38400.
+  Most of a request is the ECU's own answer delay, which the rate does not change.
+- A second form of the request (19200/31250/38400/62500 with no conditions) exists but needs
+  `10 84 04` first, after which `21 <rli>` answers only a handful of identifiers — unusable for
+  live data.
+
+Not yet confirmed on the bike.
 
 Negative response: `7F <SID> <NRC>` (0x10 generalReject, 0x11 serviceNotSupported,
 0x12 subFunctionNotSupported, 0x22 conditionsNotCorrect, 0x31 requestOutOfRange, …).
@@ -128,8 +165,11 @@ Further named channels carry a decoder from `config/status_maps.json`: 0x49 the 
 (0 open, 2 closed), 0x58 the fuelling mode (an enum, not a bitfield: 0 stopped, 1 cranking, 2 running, 3 deceleration,
 4 acceleration, 5 idle, 6–9 the same four with fuel cut-off armed, 10 cut-off, 11 fuel return), 0x5C the
 throttle zone (1 closed, 4 part throttle, 2 wide open — edges at the learned stops, with hysteresis),
-0x6E the coolant overheat flag (above 109 °C with the engine running), 0x70 the fan bits (0x01/0x02
-fan outputs, 0x04 both, 0x08/0x10 the two requests; on from 98 °C), 0x61 the neutral flag, 0x76 the side stand and 0x78 the clutch. 0x54 / 0x55 are a
+0x6E the coolant overheat flag (1 at 110 °C or more once the engine has run for 10 s with a healthy
+coolant sensor, 0 otherwise), 0x70 the fan bits (0x01 fan 2, 0x02 fan 1, 0x04 both, 0x08 the request
+behind fan 2, 0x10 the one behind fan 1; a request comes on at the calibration's coolant threshold —
+96 or 98 °C, depending on the build — with the engine running, and its output follows it; on a Granpasso fan 2's pin is the
+lambda heater, yet its bit still sets, so a hot engine reads 0x1F), 0x61 the neutral flag, 0x76 the side stand and 0x78 the clutch. 0x54 / 0x55 are a
 coil charge time compensated for battery voltage; the count stays raw.
 
 Five more identifiers carry a state rather than a measurement. **0x79 is the kill switch** (1 = STOP)
@@ -150,11 +190,13 @@ four in that list that would carry the rear bank (0x46, 0x48, 0x4A, 0x4C) are st
 Morini image; Ducati software on the same ECU wires them. Of the 41 identifiers that have a slot of
 their own, two are held constant by every Granpasso calibration — 0x74 (the immobilizer is off) and
 0x63 (a PWM output that is not used). Three depend on the build: 0x5D, 0x5E, 0x5F are the learned
-fuel trims (idle, part load, multiplicative; signed), live where learning is enabled, and 0x3D is the
-CO trim — held by the lambda loop on closed-loop builds, set by hand with a tester on open-loop ones.
-Two more are inputs not yet seen to move: 0x3E, an analog input that reads
-52, the bottom of its conversion table, and 0x77, an input that blocks the engine at 0 and has read 1
-throughout.
+fuel trims, live where learning is enabled — 0x5D (idle modes) and 0x5E (the other modes) are
+additive, signed, in 1/500 mg per injection; 0x5F is multiplicative, signed, in per mille — and 0x3D
+is the CO trim, one step = 0.04 mg (signed): held still on closed-loop builds, where the tester
+command that sets it is refused, set by hand with a tester on open-loop ones.
+Two more are inputs not yet seen to move: 0x3E, the AN1 analog input, which reads
+52, the bottom of its conversion table, and 0x77, the latched P3.6 input — at 0 it clears the run
+enable (0x7A) — which has read 1 throughout.
 
 `config/params.json` schema: `{key, name, rli, fmt(2/0), offset, length, endian, signed, scale,
 bias, recip, digits, default, group, map, map_type, dead}`. `dead` marks an identifier served by one
@@ -245,7 +287,7 @@ Decoders shipped in `config/status_maps.json` (attach to a status rli once ident
 - **runstate** (enum, 0x57): 01 power-up, 02 ignition on, 04 running, 08 stopped, 10 ignition off,
   20 shutdown, 40 ignition off while turning.
 - **throttle_zone** (enum, 0x5C): 01 closed, 02 wide open, 04 part throttle.
-- **fans** (bits, 0x70): 01 fan 2, 02 fan 1, 04 both, 08 fan 1 requested, 10 fan 2 requested.
+- **fans** (bits, 0x70): 01 fan 2, 02 fan 1, 04 both, 08 fan 2 requested, 10 fan 1 requested.
 - **motor** (cut-off bits, 16-bit): 0001 Crank … 0040 Steady running … 0400 In cut-off …
   2000 Exit cut-off (accel).
 - **tps_state** (bits): 01 min, 02 full open, 04 mid.

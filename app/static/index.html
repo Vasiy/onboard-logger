@@ -75,7 +75,7 @@
 
       <div class="card meta-grid">
         <div><span class="k" data-i18n="meta.ecu">ECU</span><span id="ecuId" class="v">—</span></div>
-        <div><span class="k" data-i18n="meta.bus">Bus speed</span><span id="busBaud" class="v">—</span></div>
+        <div><span class="k" data-i18n="meta.bus">Bus speed</span><span id="busBaud" class="v">—</span><span id="busNote" class="meta-note" hidden></span></div>
         <div><span class="k" data-i18n="meta.poll">Poll rate</span><span id="pollHz" class="v">—</span></div>
       </div>
 
@@ -500,15 +500,10 @@
             </label>
             <label><span data-i18n="cfg.baud">Bus speed</span>
               <select name="kline.baud">
-                <option value="auto" data-i18n="opt.auto">Auto</option>
-                <option value="4800">4800</option>
-                <option value="9600">9600</option>
-                <option value="10400">10400</option>
-                <option value="14400">14400</option>
-                <option value="15625">15625</option>
+                <option value="10400" data-i18n="opt.baudStd">10400 — standard</option>
                 <option value="19200">19200</option>
                 <option value="38400">38400</option>
-                <option value="57600">57600</option>
+                <option value="57600" data-i18n="opt.baudExp">57600 — experimental</option>
               </select>
             </label>
             <label><span data-i18n="cfg.init">Init</span>
@@ -518,6 +513,7 @@
               </select>
             </label>
           </div>
+          <p class="hint" data-i18n="cfg.baudHint">The link always starts at 10400 and is raised to this speed right after connecting. The ECU agrees only with the engine stopped and the bike standing — otherwise the session stays at 10400 until the next connection.</p>
         </fieldset>
 
         <fieldset class="card">

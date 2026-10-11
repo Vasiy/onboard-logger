@@ -37,7 +37,7 @@
     "port": "/dev/kline",
     "iface": "usb",
     "echo": true,
-    "baud": "auto",
+    "baud": 10400,
     "init": "fast"
   },
   "testing": {

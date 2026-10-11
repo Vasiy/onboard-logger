@@ -1,7 +1,9 @@
 """K-Line (ISO 14230 / KWP2000) serial transport for Magneti Marelli IAW 5AM.
 
 Physical layer (confirmed against denandz/5am_util):
-  * 10400 baud, 8N1, no flow control
+  * 10400 baud, 8N1, no flow control -- the only rate the ECU hears an init
+    on; a live session can be moved to a faster one afterwards
+    (KWP2000Session.switch_baud)
   * single wire, half-duplex -> everything we transmit is echoed back on RX
     before the ECU replies; the echo must be read and discarded.
   * fast-init: pull the K line low ~25 ms (serial BREAK), release ~25 ms.
@@ -26,8 +28,13 @@ import serial
 ECU_ADDR = 0x10
 TESTER_ADDR = 0xF1
 
-BAUD = 10400
-BYTE_TIME = 10.0 / BAUD  # ~0.96 ms per byte at 8N1 (start+8+stop)
+BASE_BAUD = 10400
+
+
+def wire_ms(baud: int, nbytes: int = 14) -> float:
+    """Time ``nbytes`` spend on the wire at 8N1 (10 bits each). The default is
+    one poll: a 6-byte ``21 <rli>`` request plus its 8-byte answer."""
+    return nbytes * 10_000.0 / baud
 
 
 class KLineError(Exception):
@@ -70,7 +77,7 @@ class KLineTransport:
         self,
         port: str,
         *,
-        baud: int = BAUD,
+        baud: int = BASE_BAUD,
         echo: bool = True,
         response_timeout: float = 1.2,
         inter_byte_timeout: float = 0.3,
@@ -113,6 +120,14 @@ class KLineTransport:
 
     def __exit__(self, *exc) -> None:
         self.close()
+
+    def set_baud(self, baud: int) -> None:
+        """Re-rate the open port in place: the session survives, the init is not
+        repeated. Anything half-received at the old rate is garbage, so it goes."""
+        assert self.ser is not None, "port not open"
+        self.ser.baudrate = baud
+        self.baud = baud
+        self.ser.reset_input_buffer()
 
     # -- fast init ---------------------------------------------------------
     def fast_init(self, low_ms: int = 25, high_ms: int = 25) -> None:

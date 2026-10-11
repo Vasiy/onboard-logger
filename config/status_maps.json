@@ -63,9 +63,9 @@
       "values": {"01": "Closed", "02": "Wide open", "04": "Part throttle"}
     },
     "fans": {
-      "_note": "0x70, firmware read 2026-10-08. Bit 0 and bit 1 are the two fan outputs, bit 2 is set when both are on, bits 3 and 4 are the two fan requests. The request turns on at 98 C coolant with the engine running (and on some sensor faults); the rides so far topped out at 96-97 C, which is why the channel read a flat 0. On a Granpasso the second output is used for the lambda heater, so bits 0, 2 and 4 are expected to stay clear.",
+      "_note": "0x70, handler 0x22DA2 and fan logic 0x22BB6, re-read 2026-10-11. Bit 0 is fan 2 (P3.3), bit 1 fan 1 (P7.1, the one fan a Granpasso has), bit 2 is set with both, bit 3 is the request behind fan 2 and bit 4 the request behind fan 1 -- the 2026-10-08 labels had the two requests the other way round. Each request comes on at the coolant threshold with the engine running (run_state 4), or on a coolant-sensor or fan-circuit fault, and the output follows it with no delay. On a Granpasso P3.3 belongs to the lambda heater, but only the pin write is skipped: the fan 2 flag still sets, so a hot bike reads 0x1F, not 0x12. Threshold: 136 raw (96 C) on, below 132 (92 C) off in this bike's current flash, as in the MB and MC_OL builds; the image originally read off the bike, and MD, have 138/134 (98/94 C).",
       "type": "bits", "base": 16,
-      "values": {"01": "Fan 2 on", "02": "Fan 1 on", "04": "Both fans on", "08": "Fan 1 requested", "10": "Fan 2 requested"}
+      "values": {"01": "Fan 2 on", "02": "Fan 1 on", "04": "Both fans on", "08": "Fan 2 requested", "10": "Fan 1 requested"}
     },
     "onoff": {
       "type": "enum", "base": 16,

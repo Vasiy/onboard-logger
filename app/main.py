@@ -630,7 +630,7 @@ async def lifespan(app: FastAPI):
         log_raw_default=cfg.get("logging", {}).get("raw_default", False),
         zip_after=cfg.get("logging", {}).get("zip_after", False),
         echo=cfg["kline"].get("echo", True),
-        baud=cfg["kline"].get("baud", "auto"),
+        baud=cfg["kline"].get("baud", 10400),
         init=cfg["kline"].get("init", "fast"),
         ecu_fields=ecu_fields,
         session_init=cfg.get("testing", {}).get("session_init", True),
@@ -1441,7 +1441,7 @@ async def post_config(payload: dict):
         kp, kn = prev.get("kline", {}), cfg.get("kline", {})
         if (kp.get("baud") != kn.get("baud") or kp.get("echo") != kn.get("echo")
                 or kp.get("init") != kn.get("init") or kp.get("iface") != kn.get("iface")):
-            worker.apply_kline(kn.get("baud", "auto"), kn.get("echo", True),
+            worker.apply_kline(kn.get("baud", 10400), kn.get("echo", True),
                                kn.get("init", "fast"), port=resolve_kline_port(cfg),
                                iface=kn.get("iface", "usb"))
         if fwm is not None and kp.get("iface") != kn.get("iface"):

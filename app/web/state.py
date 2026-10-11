@@ -20,7 +20,9 @@ class State:
         self.ap_channel = 0            # effective Wi-Fi channel (auto-picked)
         self.wifi_mode = "ap"          # ap | client — which side owns the radio
         self.wifi_link: dict = {}      # client mode: {associated, ssid, signal, ip}
-        self.bus_baud = 0             # K-Line baud currently in use / being tried
+        self.bus_baud = 0             # K-Line baud the session runs at right now
+        self.bus_target = 0           # what kline.baud asks for (raised after init)
+        self.bus_note = ""            # i18n key: why bus_baud is not bus_target
         # board health, refreshed by a task of its own so it is there whether or
         # not the ECU link is up: the header shows the temperature at all times
         self.cpu_temp = 0.0           # C, 0 = not readable (dev host)
@@ -50,6 +52,7 @@ class State:
         # the estimate could then only be right at the size it was measured at.
         self.poll_req_ms = 0.0
         self.poll_fixed_ms = 0.0
+        self.poll_cost_baud = 0       # the bus rate the two costs above were taken at
         self.poll_min_ms = 0
         # two independent log streams
         self.logging_decoded = False
@@ -174,6 +177,14 @@ class State:
         with self._lock:
             self.bus_baud = int(baud or 0)
 
+    def set_bus_target(self, baud: int) -> None:
+        with self._lock:
+            self.bus_target = int(baud or 0)
+
+    def set_bus_note(self, key: str) -> None:
+        with self._lock:
+            self.bus_note = key or ""
+
     def set_catalog(self, catalog: list[dict], default_selected: list[str] | None = None) -> None:
         with self._lock:
             self.catalog = catalog
@@ -273,6 +284,13 @@ class State:
         ms = (bus_s * 1000.0) / requests
         fixed_ms = max(0.0, fixed_s) * 1000.0
         with self._lock:
+            # a cost is a property of the rate it was taken at: smoothing a
+            # 38400 cycle into a 10400 average prices neither, so the first
+            # cycle at a new rate starts the average over. The rate is kept with
+            # it, and the UI re-prices from there for whatever kline.baud asks.
+            if self.poll_cost_baud != self.bus_baud:
+                self.poll_cost_baud = self.bus_baud
+                self.poll_req_ms = self.poll_fixed_ms = 0.0
             self.poll_req_ms = round(0.7 * self.poll_req_ms + 0.3 * ms, 2) if self.poll_req_ms else round(ms, 2)
             self.poll_fixed_ms = (round(0.7 * self.poll_fixed_ms + 0.3 * fixed_ms, 2)
                                   if self.poll_fixed_ms else round(fixed_ms, 2))
@@ -309,6 +327,8 @@ class State:
                 "wifi_mode": self.wifi_mode,
                 "wifi_link": dict(self.wifi_link),
                 "bus_baud": self.bus_baud,
+                "bus_target": self.bus_target,
+                "bus_note": self.bus_note,
                 "cpu_temp": self.cpu_temp,
                 "cpu_trip": self.cpu_trip,
                 "cpu_mhz": self.cpu_mhz,
@@ -328,6 +348,7 @@ class State:
                                                         else self._started_mono), 1),
                 "poll_req_ms": self.poll_req_ms,
                 "poll_fixed_ms": self.poll_fixed_ms,
+                "poll_cost_baud": self.poll_cost_baud,
                 "poll_min_ms": self.poll_min_ms,
                 "logging_decoded": self.logging_decoded,
                 "log_decoded_file": self.log_decoded_file,

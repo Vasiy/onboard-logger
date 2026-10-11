@@ -209,6 +209,66 @@ def test_resolve_kline_port():
     assert resolve_kline_port(_cfg(kline__port="/dev/ttyUSB3")) == "/dev/ttyUSB3"
 
 
+def test_kline_baud_is_the_session_rate():
+    """kline.baud names the rate the session is raised to after an init at 10400.
+
+    It used to be the rate the port opened at, "auto" included, and every board
+    in the field has one of those in /etc — load() has to read each as 10400
+    rather than hand the worker (or the UI's select) a value it has no code for.
+    """
+    from app.kline.kwp2000 import SESSION_BAUD_CODES
+    from app.web.config_mgr import SESSION_BAUDS, session_baud
+
+    assert set(SESSION_BAUDS) == {10400, *SESSION_BAUD_CODES}
+    assert _cfg()["kline"]["baud"] == 10400
+    for legacy in ("auto", "AUTO", 9600, "15625", 4800, None, "x"):
+        assert session_baud(legacy) == 10400, legacy
+    assert session_baud("38400") == 38400 and session_baud(57600) == 57600
+    with tempfile.TemporaryDirectory() as tmp:
+        cm = _cm(tmp)
+        for ok in (10400, 19200, "38400", 57600, "auto"):
+            cm.validate(_cfg(kline__baud=ok))
+        for bad in (9600, 115200, 15625, "fast"):
+            try:
+                cm.validate(_cfg(kline__baud=bad))
+            except ValueError:
+                continue
+            raise AssertionError(f"expected ValueError for baud={bad!r}")
+        (Path(tmp) / "config.json").write_text(json.dumps({"kline": {"baud": "auto"}}))
+        assert cm.load()["kline"]["baud"] == 10400
+        (Path(tmp) / "config.json").write_text(json.dumps({"kline": {"baud": "38400"}}))
+        assert cm.load()["kline"]["baud"] == 38400
+
+
+def test_kline_baud_survives_a_restart():
+    """The speed picked in Config is the one the next boot asks for.
+
+    The select posts a string ("38400"), post_config merges it over what is on
+    disk and saves it; a fresh ConfigManager -- the next start of the service --
+    must read it back, and the worker built from it must aim for that rate.
+    """
+    import tempfile as _t
+
+    from app.kline.logger import KLineWorker
+    from app.web.config_mgr import _deep_merge
+    from app.web.led import Led
+    from app.web.state import State
+
+    params = str(Path(__file__).resolve().parent.parent / "config" / "params.json")
+    with tempfile.TemporaryDirectory() as tmp:
+        cm = _cm(tmp)
+        cfg = _deep_merge(cm.load(), {"kline": {"baud": "38400"}})   # what the select sends
+        cm.validate(cfg)
+        cm.save(cfg)
+        cfg = _cm(tmp).load()                                        # the next boot
+        assert cfg["kline"]["baud"] == 38400
+        st = State()
+        KLineWorker(port="/dev/null", params_path=params, log_dir=_t.gettempdir(),
+                    state=st, led=Led(), baud=cfg["kline"]["baud"],
+                    log_decoded_default=False, log_raw_default=False)
+        assert st.snapshot()["bus_target"] == 38400
+
+
 def test_kline_iface_validation():
     with tempfile.TemporaryDirectory() as tmp:
         cm = _cm(tmp)

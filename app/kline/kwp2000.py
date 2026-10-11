@@ -4,7 +4,7 @@ Only the services needed for live-data logging and the Testing tab are
 implemented:
   * 0x81 StartCommunication
   * 0x83 AccessTimingParameter      (test mode: timing params)
-  * 0x10 StartDiagnosticSession     (test mode: session 0x81)
+  * 0x10 StartDiagnosticSession     (test mode: session 0x81; 0x85 + code: baud)
   * 0x1A ReadEcuIdentification      (grabs the "IAW 5AM ..." identity string)
   * 0x3E TesterPresent              (keep-alive)
   * 0x21 ReadDataByLocalIdentifier  (the live-data poll)
@@ -21,7 +21,9 @@ from __future__ import annotations
 import re
 import time
 
-from .transport import ChecksumError, KLineError, KLineTimeout, KLineTransport, Frame
+from .transport import (
+    BASE_BAUD, ChecksumError, KLineError, KLineTimeout, KLineTransport, Frame,
+)
 
 # Service IDs
 SID_START_COMM = 0x81
@@ -42,8 +44,20 @@ POSITIVE = 0x40  # positive response = request SID + 0x40
 NEG_RESPONSE = 0x7F
 
 DIAG_SESSION = 0x81     # standard diagnostic session
-PROG_SESSION = 0x85     # programming session (firmware path only; 5AM rejects it here)
+PROG_SESSION = 0x85     # programming session: also the one that carries a baud code
 DEFAULT_SESSION = DIAG_SESSION
+
+# `10 85 <code>` moves a live session off 10400 (application handler 0x2013E,
+# jump table 0x47B6): 1 9600, 2 19200, 3 38400, 4 57600, 5 115200, 7 38400 again.
+# The ECU answers `50` at the old rate and re-rates after it, and only with the
+# engine stopped, the bike standing and 10.0..15.5 V — else NRC 0x22. Left out on
+# purpose: 9600 is slower than the 10400 a link already has, and 115200 does not
+# survive the ECU's integer divisor (781250/baud - 1 -> ~130 kBd, 13 % off).
+# 57600 lands ~4 % off and is offered as experimental.
+SESSION_BAUD_CODES = {19200: 2, 38400: 3, 57600: 4}
+# after the `50`: the ECU is still clocking out its last stop bit at the old rate,
+# and P3min (55 ms) is the gap it expects before the next request anyway
+BAUD_SETTLE_S = 0.06
 DEFAULT_ECU_ID_OPTION = 0x80
 # identification options worth asking for: 0x80 is what we have always used,
 # 0x00 is what the IAW 5AM family also answers
@@ -83,6 +97,12 @@ class NegativeResponse(KLineError):
         )
         self.request_sid = request_sid
         self.code = code
+
+
+class BaudSwitchLost(KLineError):
+    """The ECU agreed to a new rate and then did not answer on it. It has re-rated
+    already, so the link is gone: only its own P3max timeout (5 s) puts it back
+    on 10400, where the next init can find it."""
 
 
 class KWP2000Session:
@@ -148,7 +168,9 @@ class KWP2000Session:
         This is the bring-up done right after StartCommunication:
         ``83 03 00 FF 00 FF 00``
         (AccessTimingParameter) then ``10 81`` (StartDiagnosticSession, session
-        0x81 — *not* the 0x85 programming session, which the 5AM rejects).
+        0x81 — *not* the 0x85 programming session, which the 5AM refuses with the
+        engine running). 0x81 also runs at 10400, so a link ``switch_baud`` moved
+        is put back there.
 
         Live polling (0x21) works without it, so it is armed lazily on the first
         Testing command instead of at connect: a logging session stays byte-for-byte
@@ -175,6 +197,11 @@ class KWP2000Session:
         except KLineError as e:
             out["ok"] = False
             out["session"] = _short_error(e)
+        if out["ok"] and self.t.baud != BASE_BAUD:
+            # 0x81 is the standard session, and the standard session runs at
+            # 10400: the ECU dropped back the moment it sent that `50`
+            time.sleep(BAUD_SETTLE_S)
+            self.t.set_baud(BASE_BAUD)
         self.test_mode = True   # do not retry every command; a re-link resets it
         self.test_mode_detail = f"83:{out['timing']} 10 81:{out['session']}"
         out["detail"] = self.test_mode_detail
@@ -404,9 +431,9 @@ class KWP2000Session:
 
         No StartDiagnosticSession is sent here: 0x21 polling works in the default
         session, and the session the PC tools start (0x10 0x81) is armed lazily by
-        ``enter_test_mode`` when the Testing tab needs it. 0x85 is the *programming*
-        session used before a baud switch for flashing — passing ``session``
-        explicitly still sends whatever is asked for.
+        ``enter_test_mode`` when the Testing tab needs it. A faster rate is a
+        separate step, ``switch_baud``, taken after this returns — passing
+        ``session`` explicitly still sends whatever is asked for.
         """
         self.test_mode = False       # a fresh link is back in the default session
         self.test_mode_detail = ""
@@ -419,6 +446,27 @@ class KWP2000Session:
             self.start_diagnostic_session(session)
         # never raises: some 5AM variants reject 0x1A, the link is still usable
         return self.read_ecu_identification_all()
+
+    def switch_baud(self, baud: int) -> None:
+        """Move the live session to ``baud`` (see SESSION_BAUD_CODES).
+
+        A refusal raises ``NegativeResponse`` with the ECU untouched — the link
+        carries on at the rate it has. Once the ECU has said yes there is no way
+        back short of its own timeout, so a rate it then does not answer on
+        raises ``BaudSwitchLost`` and the link has to be dropped.
+        """
+        code = SESSION_BAUD_CODES.get(baud)
+        if code is None:
+            raise ValueError(f"no session baud code for {baud}")
+        self._service(bytes([SID_START_SESSION, PROG_SESSION, code]))
+        time.sleep(BAUD_SETTLE_S)
+        self.t.set_baud(baud)
+        try:
+            self.tester_present()
+        except NegativeResponse:
+            pass                # an answer of any kind proves the new rate
+        except KLineError as e:
+            raise BaudSwitchLost(f"no answer at {baud}: {_short_error(e)}") from e
 
     def keepalive_if_idle(self, idle_s: float = 1.0) -> None:
         if time.monotonic() - self.last_tx_at >= idle_s:

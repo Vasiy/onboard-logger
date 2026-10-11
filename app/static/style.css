@@ -428,6 +428,9 @@ label.is-dirty input, label.is-dirty select { border-color: var(--warn); }
 }
 .meta-grid .k { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; font-weight: 700; }
 .meta-grid .v { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+/* why the bus is not at the configured speed: one short line under the number */
+.meta-grid .meta-note { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+.meta-grid .meta-note[hidden] { display: none; }
 
 /* ---------- parameters ---------- */
 .params { display: flex; flex-direction: column; }

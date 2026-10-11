@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.kline.transport import KLineTransport, Frame, ChecksumError  # noqa: E402
-from app.kline.kwp2000 import KWP2000Session, NegativeResponse  # noqa: E402
+from app.kline.kwp2000 import BaudSwitchLost, KWP2000Session, NegativeResponse  # noqa: E402
 from app.kline.params import Param, ParamMap  # noqa: E402
 
 
@@ -24,6 +24,7 @@ class FakeSerial:
         self.timeout = 0.1
         self.write_timeout = 1.0
         self.break_condition = False
+        self.baudrate = 10400
 
     def reset_input_buffer(self):
         self.rx.clear()
@@ -215,6 +216,85 @@ def test_enter_test_mode_survives_rejection():
     r = sess.enter_test_mode()                       # must not raise
     assert r["ok"] is False and r["nrc"] == 0x12
     assert sess.test_mode                            # armed anyway; tests may proceed
+
+
+def _baud_ecu(session_reply, tp_reply=True):
+    """An ECU that answers `10 85 <code>` with ``session_reply`` and, if
+    ``tp_reply``, TesterPresent with `7E`; 10 81 with `50 81`."""
+    def responder(tx):
+        sid = tx[3]
+        if sid == 0x10 and tx[4] == 0x85:
+            return _resp_frame(session_reply)
+        if sid == 0x10:
+            return _resp_frame(bytes([0x50, tx[4]]))
+        if sid == 0x83:
+            return _resp_frame(bytes([0xC3, 0x03]))
+        if sid == 0x3E:
+            return _resp_frame(bytes([0x7E])) if tp_reply else b""
+        return _resp_frame(bytes([0x7F, sid, 0x11]))
+
+    t = KLineTransport("/dev/null")
+    t.ser = FakeSerial(responder)
+    t.response_timeout = 0.05
+    return t, KWP2000Session(t)
+
+
+def test_switch_baud_reraises_the_port_after_the_ecu_agrees():
+    t, sess = _baud_ecu(bytes([0x50, 0x85]))
+    sess.switch_baud(38400)
+    sent = bytes(t.ser.tx)
+    assert b"\x10\x85\x03" in sent                   # code 3 = 38400 (jump table 0x47B6)
+    assert sent.endswith(t.build_frame(b"\x3e"))     # verified on the new rate
+    assert t.ser.baudrate == 38400 and t.baud == 38400
+
+
+def test_switch_baud_refused_leaves_the_rate_alone():
+    # engine running: 7F 10 22, and the ECU never moved
+    t, sess = _baud_ecu(bytes([0x7F, 0x10, 0x22]))
+    try:
+        sess.switch_baud(19200)
+    except NegativeResponse as e:
+        assert e.code == 0x22
+    else:
+        raise AssertionError("a refusal must raise")
+    assert t.ser.baudrate == 10400 and t.baud == 10400
+    assert t.build_frame(b"\x3e") not in bytes(t.ser.tx)   # no verify: nothing moved
+
+
+def test_switch_baud_with_no_answer_after_is_a_lost_link():
+    t, sess = _baud_ecu(bytes([0x50, 0x85]), tp_reply=False)
+    try:
+        sess.switch_baud(57600)
+    except BaudSwitchLost:
+        pass
+    else:
+        raise AssertionError("silence on the new rate must drop the link")
+
+
+def test_switch_baud_only_knows_the_session_rates():
+    _t, sess = _baud_ecu(bytes([0x50, 0x85]))
+    for bad in (9600, 10400, 115200):
+        try:
+            sess.switch_baud(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"expected ValueError for {bad}")
+
+
+def test_test_mode_puts_a_raised_link_back_on_10400():
+    # 10 81 is the standard session, and the standard session runs at 10400
+    t, sess = _baud_ecu(bytes([0x50, 0x85]))
+    sess.switch_baud(38400)
+    assert sess.enter_test_mode()["ok"]
+    assert t.ser.baudrate == 10400 and t.baud == 10400
+
+
+def test_test_mode_rejected_keeps_the_raised_rate():
+    t, sess = _baud_ecu(bytes([0x50, 0x85]))
+    sess.switch_baud(38400)
+    t.ser.responder = lambda tx: _resp_frame(bytes([0x7F, tx[3], 0x12]))
+    assert sess.enter_test_mode()["ok"] is False
+    assert t.baud == 38400                          # the ECU did not move either
 
 
 def test_actuator_set_frames():
@@ -447,6 +527,90 @@ def test_the_two_halves_of_a_cycle_are_measured_apart():
     st, ses = _cycle({rpm.rli: "ok"}, ["rpm"], bus_s=0.03, fixed_sleep=0.05)
     assert 25 < st.poll_req_ms < 45, st.poll_req_ms       # ~30 ms of wire, one request
     assert 40 < st.poll_fixed_ms < 90, st.poll_fixed_ms   # ~50 ms of cycle, charged once
+
+
+class _SwitchSession:
+    """Stands in for KWP2000Session.switch_baud: answers with ``outcome``."""
+
+    def __init__(self, outcome):
+        self.outcome = outcome
+        self.asked = []
+
+    def switch_baud(self, baud):
+        self.asked.append(baud)
+        if self.outcome == "refused":
+            raise NegativeResponse(0x10, 0x22)
+        if self.outcome == "lost":
+            raise BaudSwitchLost("no answer")
+
+
+def _worker(baud):
+    import tempfile
+
+    from app.kline.logger import KLineWorker
+    from app.web.led import Led
+    from app.web.state import State
+
+    params = str(Path(__file__).resolve().parent.parent / "config" / "params.json")
+    return KLineWorker(port="/dev/null", params_path=params, log_dir=tempfile.gettempdir(),
+                       state=State(), led=Led(), baud=baud,
+                       log_decoded_default=False, log_raw_default=False)
+
+
+def test_worker_raises_the_link_to_the_configured_rate():
+    w = _worker(38400)
+    w.state.set_bus_baud(10400)
+    assert w._raise_baud(_SwitchSession("ok")) == "ok"
+    snap = w.state.snapshot()
+    assert (snap["bus_baud"], snap["bus_target"], snap["bus_note"]) == (38400, 38400, "")
+
+
+def test_worker_never_asks_for_10400_or_a_legacy_rate():
+    for legacy in (10400, "auto", 9600, "15625"):
+        w = _worker(legacy)
+        ses = _SwitchSession("ok")
+        assert w._raise_baud(ses) == "" and ses.asked == [], legacy
+        assert w.state.snapshot()["bus_target"] == 10400
+
+
+def test_worker_refused_rate_stays_on_10400_and_says_why():
+    w = _worker(19200)
+    w.state.set_bus_baud(10400)
+    assert w._raise_baud(_SwitchSession("refused")) == "nrc 22"
+    snap = w.state.snapshot()
+    assert (snap["bus_baud"], snap["bus_note"]) == (10400, "bus.refused")
+    ses = _SwitchSession("ok")
+    w._raise_baud(ses)
+    assert ses.asked == [19200]                   # a refusal is retried next link
+
+
+def test_worker_lost_rate_is_not_asked_for_again_until_the_setting_changes():
+    w = _worker(57600)
+    try:
+        w._raise_baud(_SwitchSession("lost"))
+    except BaudSwitchLost:
+        pass
+    else:
+        raise AssertionError("a lost link must tear the session down")
+    ses = _SwitchSession("ok")
+    assert w._raise_baud(ses) == "skipped" and ses.asked == []
+    assert w.state.snapshot()["bus_note"] == "bus.lost"
+    w.apply_kline(38400)                          # a new choice is worth a try
+    assert w._raise_baud(ses) == "ok" and ses.asked == [38400]
+
+
+def test_poll_cost_starts_over_at_a_new_rate():
+    from app.web.state import State
+
+    st = State()
+    st.set_bus_baud(10400)
+    st.set_poll_cost(0.080, 1, 0.010)
+    st.set_poll_cost(0.080, 1, 0.010)
+    assert st.poll_req_ms == 80.0 and st.poll_cost_baud == 10400
+    st.set_bus_baud(38400)
+    st.set_poll_cost(0.070, 1, 0.010)             # not 0.7*80 + 0.3*70
+    snap = st.snapshot()
+    assert (snap["poll_req_ms"], snap["poll_cost_baud"]) == (70.0, 38400)
 
 
 def _main():

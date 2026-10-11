@@ -607,7 +607,15 @@ const sameSet = (set, keys) => set.size === keys.length && keys.every((k) => set
 // With no link only the wire arithmetic is left, and the fixed half is taken as
 // zero: there is no paper value for it — it is a property of this board and its
 // storage — and a made-up constant would be worse than an honest floor.
-const PAPER_REQ_MS = 13.5;      // 6-byte request + 8-byte reply at 10400 8N1
+//
+// The bus speed is the one input that changes the wire half without the ECU
+// changing at all: a request is 6 bytes out and 8 back, 10 bits each, so
+// 13.5 ms of it is wire at 10400 and 3.6 ms at 38400. A measured cost carries
+// the rate it was taken at (`poll_cost_baud`), so pricing for the speed Config
+// asks for (`bus_target`) swaps that rate's wire time for the other's and keeps
+// the rest — the ECU's own answer delay, which is most of a request — as it was.
+const BASE_BAUD = 10400;
+const wireMs = (baud) => 140000 / (baud || BASE_BAUD);
 
 function reqCount(keys) {
   // a derived channel is worked out from channels that are already polled, so its
@@ -620,10 +628,24 @@ function estimateCost(keys) {
   const n = reqCount(keys);
   if (!n) return null;
   const s = lastSnapshot || {};
-  const per = s.poll_req_ms > 0 ? s.poll_req_ms : PAPER_REQ_MS;
+  const target = s.bus_target || BASE_BAUD;
+  const per = s.poll_req_ms > 0
+    ? Math.max(wireMs(target), s.poll_req_ms - wireMs(s.poll_cost_baud) + wireMs(target))
+    : wireMs(target);
   const fixed = s.poll_req_ms > 0 ? (s.poll_fixed_ms || 0) : 0;
   const floor = s.poll_min_ms > 0 ? s.poll_min_ms : 150;
   return { n, hz: 1000 / Math.max(floor, fixed + n * per) };
+}
+
+// The speed the session really runs at, not the one Config asks for: the ECU
+// raises it only with the engine stopped, and Testing's 10 81 drops it back.
+// The line under the number says which of those happened.
+function renderBusBaud(s) {
+  $("#busBaud").textContent = s.bus_baud ? s.bus_baud + " " + t("unit.baud") : "—";
+  const note = $("#busNote");
+  const off = s.status === "connected" && s.bus_note && s.bus_target && s.bus_baud !== s.bus_target;
+  note.hidden = !off;
+  note.textContent = off ? t(s.bus_note).replace("%d", s.bus_target) : "";
 }
 
 function renderPresetCost() {
@@ -1300,7 +1322,10 @@ function applySnapshot(s) {
   // poll rate only meaningful when connected AND something is selected to poll
   const polling = s.status === "connected" && (s.selected || []).length > 0 && !s.scan_on;
   $("#pollHz").textContent = polling ? (s.poll_hz || 0).toFixed(1) + " " + t("unit.hz") : "—";
-  $("#busBaud").textContent = s.bus_baud ? s.bus_baud + " " + t("unit.baud") : "—";
+  renderBusBaud(s);
+  // the price moves with the snapshot too: a new measurement, or a bus speed
+  // picked in Config, re-prices the set without a single tick changing
+  renderPresetCost();
   renderPowerSave(s);
 
   const dT = $("#decToggle"), rT = $("#rawToggle");

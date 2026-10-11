@@ -19,14 +19,26 @@ from app.web.storage import day_name, resolve_root
 from .ecu_id import DEFAULT_FIELDS, describe, parse_fields
 from .gear import GearMap, GearReader
 from .params import ParamMap
-from .kwp2000 import KWP2000Session, NegativeResponse
-from .transport import ChecksumError, KLineError, KLineTimeout, KLineTransport
+from .kwp2000 import (
+    SESSION_BAUD_CODES, BaudSwitchLost, KWP2000Session, NegativeResponse,
+)
+from .transport import (
+    BASE_BAUD, ChecksumError, KLineError, KLineTimeout, KLineTransport,
+)
 
 MAX_LOG_BYTES = 64 * 1024 * 1024  # roll the ndjson file at 64 MiB
 
-# Candidate K-Line rates tried (in order) when baud == "auto". 10400 is the
-# standard IAW 5AM / KWP2000 rate and comes first.
-AUTO_BAUDS = [10400, 9600, 15625, 19200]
+
+
+def _session_target(baud) -> int:
+    """The rate kline.baud asks the session to run at. The port always opens at
+    10400 — the only rate an IAW 5AM hears an init on — so anything that is not
+    a known session rate (the old "auto", 9600, ...) means staying there."""
+    try:
+        b = int(baud)
+    except (TypeError, ValueError):
+        return BASE_BAUD
+    return b if b in SESSION_BAUD_CODES else BASE_BAUD
 
 
 def _friendly_error(exc: Exception) -> str:
@@ -36,6 +48,8 @@ def _friendly_error(exc: Exception) -> str:
         return "err.no_adapter"
     if isinstance(exc, PermissionError) or "Permission denied" in s or "Errno 13" in s:
         return "err.port_denied"
+    if isinstance(exc, BaudSwitchLost):
+        return "err.baud_lost"
     if isinstance(exc, NegativeResponse):
         return "err.ecu_rejected"
     if isinstance(exc, KLineTimeout) or "before timeout" in s:
@@ -59,7 +73,7 @@ class KLineWorker(threading.Thread):
         log_raw_default: bool = False,
         zip_after: bool = False,
         echo: bool = True,
-        baud="auto",
+        baud=BASE_BAUD,
         init="fast",
         ecu_fields=None,
         reconnect_delay: float = 2.0,
@@ -85,9 +99,12 @@ class KLineWorker(threading.Thread):
         self._init_slow = str(init).lower() == "slow"   # fast-init (default) vs 5-baud slow init
         self.reconnect_delay = reconnect_delay
 
-        self._auto_baud = str(baud).lower() == "auto"
-        self._bauds = AUTO_BAUDS if self._auto_baud else [int(baud)]
-        self._baud_idx = 0
+        self._target_baud = _session_target(baud)
+        # a rate the ECU agreed to and then went silent on is not asked for again
+        # until the setting changes: every retry costs a dead link and a 5 s wait
+        # for the ECU's own timeout
+        self._baud_bad: int | None = None
+        self.state.set_bus_target(self._target_baud)
 
         self._stop_event = threading.Event()
         # pause handshake so an exclusive port user (firmware flasher) can take
@@ -216,9 +233,9 @@ class KLineWorker(threading.Thread):
         no reboot. Drops the current link so the next attempt uses the new
         settings; self.port is read fresh on every reconnect (run()), so
         reassigning it here is enough to move to the other physical path."""
-        self._auto_baud = str(baud).lower() == "auto"
-        self._bauds = AUTO_BAUDS if self._auto_baud else [int(baud)]
-        self._baud_idx = 0
+        self._target_baud = _session_target(baud)
+        self._baud_bad = None
+        self.state.set_bus_target(self._target_baud)
         if echo is not None:
             self.echo = bool(echo)
         if init is not None:
@@ -355,9 +372,13 @@ class KLineWorker(threading.Thread):
         KWP2000Session.enter_test_mode. Disabled by config testing.session_init."""
         if not self._session_init:
             return None
+        before = session.t.baud
         mode = session.enter_test_mode()
         self.state.set_test_mode(session.test_mode and mode.get("ok", False),
                                  mode.get("detail", ""))
+        if session.t.baud != before:    # 10 81 is the standard session: 10400
+            self.state.set_bus_baud(session.t.baud)
+            self.state.set_bus_note("bus.testing")
         return mode
 
     # -- actuator tests (worker thread) -----------------------------------
@@ -680,6 +701,36 @@ class KLineWorker(threading.Thread):
         self._open_day = None
         self._root_check_at = 0.0
 
+    # -- session baud (worker thread) -------------------------------------
+    def _raise_baud(self, session: KWP2000Session) -> str:
+        """Move a fresh link to kline.baud; the outcome tag goes into link_up.
+
+        Tried once per link, never mid-way through one: the ECU agrees only with
+        the engine stopped, so a refusal stands until the next init — by which
+        time the bike may be standing again.
+        """
+        target = self._target_baud
+        if target == BASE_BAUD:
+            self.state.set_bus_note("")
+            return ""
+        if target == self._baud_bad:
+            self.state.set_bus_note("bus.lost")
+            return "skipped"
+        try:
+            session.switch_baud(target)
+        except BaudSwitchLost:
+            self._baud_bad = target
+            self.state.set_bus_note("bus.lost")
+            raise                       # the ECU is gone; tear the link down
+        except NegativeResponse as e:
+            # engine running, bike moving or voltage out of 10..15.5 V (0x22):
+            # the ECU stayed where it was, and so does the link
+            self.state.set_bus_note("bus.refused")
+            return "nrc %02x" % e.code
+        self.state.set_bus_baud(target)
+        self.state.set_bus_note("")
+        return "ok"
+
     # -- main loop --------------------------------------------------------
     def run(self) -> None:
         while not self._stop_event.is_set():
@@ -694,9 +745,8 @@ class KLineWorker(threading.Thread):
                     self._stop_event.wait(0.2)
                 self._paused_ack.clear()
                 continue
-            baud = self._bauds[self._baud_idx]
-            self.state.set_bus_baud(baud)
-            transport = KLineTransport(self.port, baud=baud, echo=self.echo)
+            self.state.set_bus_baud(BASE_BAUD)
+            transport = KLineTransport(self.port, baud=BASE_BAUD, echo=self.echo)
             connected = False
             clean = False
             session = None
@@ -708,6 +758,7 @@ class KLineWorker(threading.Thread):
                 transport.open()
                 session = KWP2000Session(transport)
                 ecu_id = session.connect(slow=self._init_slow)
+                switch = self._raise_baud(session)
                 connected = True
                 self.state.set_ecu_id(ecu_id)
                 self.state.set_ecu_hw(session.ecu_hw)
@@ -728,7 +779,8 @@ class KLineWorker(threading.Thread):
                 # not emitted here: the file does not exist until the first log
                 # opens, a moment later, and this is the line worth having at its top
                 self._link_ctx = {
-                    "baud": baud, "init": "slow" if self._init_slow else "fast",
+                    "baud": transport.baud, "target": self._target_baud,
+                    "switch": switch, "init": "slow" if self._init_slow else "fast",
                     "ecu": (ecu_id or "?").split()[0] if ecu_id else "?",
                     "iface": self.iface,
                 }
@@ -747,7 +799,7 @@ class KLineWorker(threading.Thread):
                 if not connected and _friendly_error(exc) != self._last_fail:
                     self._last_fail = _friendly_error(exc)
                     self._diag("link_fail", err=type(exc).__name__,
-                               detail=str(exc)[:100], baud=baud,
+                               detail=str(exc)[:100], baud=transport.baud,
                                tty=int(Path(self.port).exists()), iface=self.iface)
                 self.state.set_status("error", _friendly_error(exc))
                 self.state.set_ecu_fields({})   # drop the ECU banner on disconnect
@@ -768,9 +820,6 @@ class KLineWorker(threading.Thread):
                                up=round(time.monotonic() - self._link_at, 1),
                                tty=int(Path(self.port).exists()), iface=self.iface)
                 self._close_all_logs()  # never keep logging once the link ends
-            # rotate to the next candidate rate only if the initial link failed
-            if not connected and self._auto_baud:
-                self._baud_idx = (self._baud_idx + 1) % len(self._bauds)
             if self._stop_event.is_set():
                 break
             time.sleep(self.reconnect_delay)

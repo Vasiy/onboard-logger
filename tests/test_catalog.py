@@ -37,14 +37,17 @@ def _selectable():
 def test_the_named_channels_carry_the_names_the_firmware_gives_them():
     """0x75 and 0x62 were named by the 2026-09-10 ride; 0x5C, 0x6A and 0x58 were
     renamed, and 0x6E and 0x70 named, by the 2026-10-08 read of the code behind
-    each slot."""
+    each slot. The 2026-10-11 cross-check settled 0x6E, 0x70 and 0x77 from that
+    code; 0x3E keeps 'check' because the code names the input, not the sensor."""
     for key, rli, group, mp in (("engine_run", 0x75, "known", "onoff"),
                                 ("idle_mode", 0x62, "known", "idle_mode"),
                                 ("throttle_zone", 0x5C, "known", "throttle_zone"),
                                 ("tps_bypass", 0x6A, "known", ""),
                                 ("fuel_mode", 0x58, "known", "fuel_mode"),
-                                ("overheat", 0x6E, "check", "onoff"),
-                                ("fans", 0x70, "check", "fans")):
+                                ("overheat", 0x6E, "known", "onoff"),
+                                ("fans", 0x70, "known", "fans"),
+                                ("p36_permit", 0x77, "known", "kill_run"),
+                                ("an1", 0x3E, "check", "")):
         p = BY_KEY.get(key)
         assert p, f"{key} is missing from params.json"
         assert p["rli"] == rli, (key, hex(p["rli"]))
@@ -56,6 +59,16 @@ def test_the_named_channels_carry_the_names_the_firmware_gives_them():
         assert gone not in BY_KEY, f"{gone} was renamed; the old key must not linger"
     assert "motorstate" not in MAPS and "warmup_on" not in MAPS
     assert MAPS["fuel_mode"]["type"] == "enum", "0x58 is a mode number, not a bitfield"
+
+
+def test_each_fan_request_sits_beside_the_output_it_drives():
+    """Handler 0x22DA2 packs D3A6 (fan 2, P3.3) into bit 0, D3A7 (fan 1, P7.1)
+    into bit 1, D3A4 into bit 3 and D3A5 into bit 4; the fan logic at 0x22BB6
+    drives D3A6 from D3A4 and D3A7 from D3A5. The first labels paired the
+    requests with the wrong fans."""
+    v = MAPS["fans"]["values"]
+    assert v["01"] == "Fan 2 on" and v["08"] == "Fan 2 requested"
+    assert v["02"] == "Fan 1 on" and v["10"] == "Fan 1 requested"
 
 
 def test_advance_is_signed():
@@ -83,10 +96,10 @@ def test_stubs_and_calibration_constants_are_dead_and_the_rest_are_not():
         assert p.get("dead") is True, f"{key} is constant by calibration"
         assert "constant by calibration" in p["name"], f"{key} should say why"
         assert key not in sel
-    for key in ("r77", "r3e", "co_trim", "adapt_idle", "adapt_part", "adapt_mult"):
+    for key in ("p36_permit", "an1", "co_trim", "adapt_idle", "adapt_part", "adapt_mult"):
         assert not BY_KEY[key].get("dead"), f"{key} is live on some build"
         assert key in sel, f"{key} still has a state left to record"
-    for gone in ("r5d", "r5e", "r5f"):
+    for gone in ("r5d", "r5e", "r5f", "r77", "r3e"):
         assert gone not in BY_KEY, f"{gone} was renamed; the old key must not linger"
     assert sum(1 for p in PARAMS["params"] if p.get("dead")) == 38 + 2
 
