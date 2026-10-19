@@ -1,0 +1,33 @@
+--- a/main.c
++++ b/main.c
+@@ -22,6 +22,11 @@
+ 
+ int debug = 0;
+ int timeout = 50;
++// Native UARTs (no USB latency timer) can leave the ECU's reply later than the
++// per-byte gap. Wait this long for the first reply byte, then fall back to the
++// short gap: a fast reply costs nothing extra.
++int first_wait = 300;
++size_t skip_bytes = 0;
+ struct termios2 tio;
+ 
+ uint8_t checksum8(uint8_t * bytes, uint64_t len){
+@@ -223,7 +228,7 @@
+ 
+     size_t i = 0;
+ 
+-    while(poll(&pfd, 1, timeout) != 0){
++    while(poll(&pfd, 1, i <= skip_bytes && first_wait > timeout ? first_wait : timeout) != 0){
+         if(i == len){
+             break; 
+         }
+@@ -257,7 +262,9 @@
+     }
+ 
+     wlen = write_msg(fd, send_buf, send_len);
++    skip_bytes = wlen;
+     rlen = read_msg(fd, recv_buf, recv_len);
++    skip_bytes = 0;
+ 
+     // Adapter should respond with the message we sent, then any additional data from the ECU
+     if(rlen <= wlen){

@@ -535,6 +535,7 @@ class _SwitchSession:
     def __init__(self, outcome):
         self.outcome = outcome
         self.asked = []
+        self.reads = []
 
     def switch_baud(self, baud):
         self.asked.append(baud)
@@ -542,6 +543,14 @@ class _SwitchSession:
             raise NegativeResponse(0x10, 0x22)
         if self.outcome == "lost":
             raise BaudSwitchLost("no answer")
+
+    def read_local(self, rli, **_kw):
+        self.reads.append(rli)
+        if self.outcome == "no_data":
+            return {"status": "nrc", "nrc": 0x11}
+        if self.outcome == "silent":
+            return {"status": "timeout", "nrc": None}
+        return {"status": "ok", "nrc": None}
 
 
 def _worker(baud):
@@ -597,6 +606,23 @@ def test_worker_lost_rate_is_not_asked_for_again_until_the_setting_changes():
     assert w.state.snapshot()["bus_note"] == "bus.lost"
     w.apply_kline(38400)                          # a new choice is worth a try
     assert w._raise_baud(ses) == "ok" and ses.asked == [38400]
+
+
+def test_worker_drops_a_rate_that_answers_but_serves_no_live_data():
+    """The bike took every rate and then refused reads and tests (2026-10-19)."""
+    for outcome in ("no_data", "silent"):
+        w = _worker(38400)
+        ses = _SwitchSession(outcome)
+        try:
+            w._raise_baud(ses)
+        except BaudSwitchLost as e:
+            assert "no live data at 38400" in str(e)
+        else:
+            raise AssertionError("a rate without live data must tear the link down")
+        assert ses.reads == [0x30]
+        assert w.state.snapshot()["bus_note"] == "bus.lost"
+        nxt = _SwitchSession("ok")
+        assert w._raise_baud(nxt) == "skipped" and nxt.asked == []   # not retried
 
 
 def test_poll_cost_starts_over_at_a_new_rate():

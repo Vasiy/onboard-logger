@@ -121,7 +121,12 @@ An init is only heard at 10400. Once the link is up, `10 85 <code>` moves it to 
   `10 84 04` first, after which `21 <rli>` answers only a handful of identifiers — unusable for
   live data.
 
-Not yet confirmed on the bike.
+**Observed:** the ECU accepts the switch and answers at the new rate, but live reads (`21`) and
+the Testing commands then fail at every rate other than 10400. The cause is not established (the
+programming session `0x85` that carries the baud code is the first suspect). The logger
+therefore reads `21 30` right after a switch and, if that fails, drops the link and stays at
+10400; the journal line `[kline] <baud> baud: switch accepted, 21 30 -> <why>` says which way
+it failed.
 
 Negative response: `7F <SID> <NRC>` (0x10 generalReject, 0x11 serviceNotSupported,
 0x12 subFunctionNotSupported, 0x22 conditionsNotCorrect, 0x31 requestOutOfRange, …).
@@ -277,6 +282,14 @@ Programming path (handled by [`denandz/5am_util`](https://github.com/denandz/5am
 built for aarch64): `10 85` StartDiagnosticSession → `27` SecurityAccess (seed/key) → baud switch
 → block transfer (`34`/`36`) + checksum. Image size is exactly **327680** bytes (0x50000);
 writing any other size is blocked. Read ≈ 20 min. ⚠ Writing risks bricking the ECU.
+
+A write completes through the USB cable (211 s) and through the direct UART1/L9637D link. The
+util's 50 ms per-byte gap is too short for the native UART, so the board builds it with
+`patches/5am_util-first-wait.patch` (wait up to 300 ms for the first reply byte, then the usual
+50 ms). The ECU answers `33 01` (start programming) with `7F 33 78` "pending", and the util
+exits 2 s later without waiting for a final positive reply. `app/kline/flasher.py` is a framed,
+checked implementation of the same sequence (not wired in yet); `app/kline/fw_codec.py` holds
+the image encoding, checksum and seed/key.
 
 Both directions start at 10400 and move the link before the transfer — on different rates and
 by different requests (frames with header and checksum stripped):

@@ -135,6 +135,15 @@ def test_overridden_write_leaves_a_trace_in_the_operation_log():
         assert any("guard overridden: model_mismatch" in ln for ln in fm.status()["log"])
 
 
+def test_native_uart_write_is_flagged_in_the_operation_log():
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "other.bin").write_bytes(b"\x00" * 16)
+        fm = FirmwareManager(lambda: None, "/usr/bin/true", tmp, "/dev/ttyS1", State())
+        fm.start_write("other.bin")
+        fm._thread.join(timeout=5)
+        assert any("native UART /dev/ttyS1" in ln for ln in fm.status()["log"])
+
+
 def _run_true(worker, tmp):
     fm = FirmwareManager(
         worker_getter=lambda: worker, util_path="/usr/bin/true",
@@ -260,6 +269,17 @@ def test_zero_exit_with_an_error_line_is_still_a_failure():
         text = next(iter(logs.rglob("fw-reading-*.log"))).read_text()
         assert "\x1b[" not in text          # ANSI colour stripped before logging
         assert "FW verdict " in text
+
+
+def test_the_utils_red_write_warnings_are_not_a_failure():
+    """Every 5am_util write prints "[!] Will write firmware" and "[!] Checksum" in red;
+    a write that finished on 2026-10-18 was logged result=error because of them."""
+    with tempfile.TemporaryDirectory() as tmp:
+        body = ('echo "[!] Will write firmware: x.bin [!]"; echo "[!] Checksum: ed02 [!]"; '
+                'echo "[+] Write complete"')
+        fm, logs = _run_util(tmp, body, rc=0, op="write")
+        assert fm.status()["result"] == "ok", fm.status()["progress"]
+        assert "FW end result=ok" in next(iter(logs.rglob("fw-writing-*.log"))).read_text()
 
 
 def test_short_read_is_a_failure():

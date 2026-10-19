@@ -39,7 +39,9 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 # 5am_util exits 0 even when it failed ("ERROR: ioctl: Bad file descriptor" with
 # no adapter attached, main.c:494), so the exit code alone must never decide the
 # result — its own error lines and the size of what came out do.
-UTIL_ERR_RE = re.compile(r"\[!\]|\berror\b|\bfailed\b|timeout", re.I)
+# "[!]" alone is not an error: every write prints "[!] Will write firmware" and
+# "[!] Checksum" in red as a warning, and a finished write used to be reported as failed.
+UTIL_ERR_RE = re.compile(r"\berror\b|\bfailed\b|timeout", re.I)
 
 # Both operations say exactly where they are, behind a \r spinner, so the UI bar
 # is read out of the util instead of guessed from elapsed time:
@@ -158,6 +160,11 @@ class FirmwareManager:
                 raise FirmwareBlocked(verdict)
             if verdict.get("overridden"):
                 self._pending_note = "[!] guard overridden: " + str(verdict.get("reason", ""))
+        if self.port.startswith("/dev/ttyS"):
+            # 5am_util is written for a USB KKL cable; on the native UART it has
+            # died at "Short read" right after the 1A 80 request (2026-10-17).
+            self._pending_note = self._pending_note or (
+                "[!] native UART %s: write path never verified on the ECU" % self.port)
         cmd = [str(self.util_path), "-w", str(path), "-i", self.port, "-v"]
         self._start("writing", name, cmd, confirm=True, ui_verbose=verbose)
 

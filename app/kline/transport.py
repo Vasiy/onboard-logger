@@ -217,7 +217,12 @@ class KLineTransport:
     def send_frame(self, data: bytes, target: int = ECU_ADDR, source: int = TESTER_ADDR,
                    with_addr: bool = True) -> bytes:
         assert self.ser is not None, "port not open"
-        frame = self.build_frame(data, target, source, with_addr)
+        return self.send_raw(self.build_frame(data, target, source, with_addr))
+
+    def send_raw(self, frame: bytes) -> bytes:
+        """Send an already built frame (the flasher needs header forms build_frame
+        does not make: a separate length byte, source 0x01) and swallow the echo."""
+        assert self.ser is not None, "port not open"
         self.ser.reset_input_buffer()
         self.ser.write(frame)
         self.ser.flush()

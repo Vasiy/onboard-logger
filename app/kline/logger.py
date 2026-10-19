@@ -27,6 +27,7 @@ from .transport import (
 )
 
 MAX_LOG_BYTES = 64 * 1024 * 1024  # roll the ndjson file at 64 MiB
+PROBE_RLI = 0x30                   # rpm: the read that proves a raised rate carries live data
 
 
 
@@ -721,12 +722,26 @@ class KLineWorker(threading.Thread):
         except BaudSwitchLost:
             self._baud_bad = target
             self.state.set_bus_note("bus.lost")
+            print("[kline] %d baud: no answer after the switch" % target, flush=True)
             raise                       # the ECU is gone; tear the link down
         except NegativeResponse as e:
             # engine running, bike moving or voltage out of 10..15.5 V (0x22):
             # the ECU stayed where it was, and so does the link
             self.state.set_bus_note("bus.refused")
+            print("[kline] %d baud: refused, nrc %02x" % (target, e.code), flush=True)
             return "nrc %02x" % e.code
+        # TesterPresent answering proved the rate, not that live data is served at it:
+        # on the bike (2026-10-19) the ECU took every rate and then refused reads and
+        # tests. A rate that cannot read is dropped like a lost one, and not retried.
+        probe = session.read_local(PROBE_RLI)
+        if probe["status"] != "ok":
+            self._baud_bad = target
+            self.state.set_bus_note("bus.lost")
+            why = probe["status"] + (" %02x" % probe["nrc"] if probe["nrc"] is not None else "")
+            print("[kline] %d baud: switch accepted, 21 %02x -> %s" % (target, PROBE_RLI, why),
+                  flush=True)
+            raise BaudSwitchLost("no live data at %d: %s" % (target, why))
+        print("[kline] %d baud: ok" % target, flush=True)
         self.state.set_bus_baud(target)
         self.state.set_bus_note("")
         return "ok"

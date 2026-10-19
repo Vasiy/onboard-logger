@@ -190,6 +190,44 @@ function confirmDialog(text, { danger = false, okLabel } = {}) {
   });
 }
 
+// A one-button notice for something that has to be seen rather than answered. `remind`
+// is the line that must not be missed (kept apart so it can be styled as the point).
+function noticeDialog(title, text, { kind = "ok", remind = "" } = {}) {
+  return new Promise((resolve) => {
+    const back = document.createElement("div");
+    back.className = "modal-back";
+    back.innerHTML =
+      `<div class="modal modal--${kind === "err" ? "err" : "ok"}" role="alertdialog" aria-modal="true">` +
+      `<h3 class="modal__title"></h3>` +
+      `<p class="modal__text"></p>` +
+      `<p class="modal__remind"></p>` +
+      `<div class="modal__actions"><button class="btn btn--primary" data-act="ok"></button></div></div>`;
+    $(".modal__title", back).textContent = title;
+    const txt = $(".modal__text", back);
+    txt.textContent = text || "";
+    txt.hidden = !text;
+    const rem = $(".modal__remind", back);
+    rem.textContent = remind;
+    rem.hidden = !remind;
+    $('[data-act="ok"]', back).textContent = t("fw.gotIt");
+    const prev = document.activeElement;
+    const done = () => {
+      document.removeEventListener("keydown", onKey, true);
+      back.remove();
+      if (prev && prev.focus) prev.focus();
+      resolve();
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape" || e.key === "Enter") { e.preventDefault(); done(); }
+      else if (e.key === "Tab") { e.preventDefault(); $('[data-act="ok"]', back).focus(); }
+    };
+    $('[data-act="ok"]', back).addEventListener("click", done);
+    document.addEventListener("keydown", onKey, true);
+    document.body.appendChild(back);
+    $('[data-act="ok"]', back).focus();
+  });
+}
+
 // One busy state for every command that goes to the board: the button locks and
 // says it is working, so a second tap cannot queue a second K-Line command.
 async function withBusy(btn, fn) {
@@ -3035,6 +3073,47 @@ async function loadFirmware() {
   checkWriteGuard();
 }
 
+// A read runs ~20 minutes and a write ~4, and the rider is rarely on the Firmware tab
+// when one ends, so the end is announced from here whichever tab is open. The watcher
+// runs only while an operation is known to be going (started here, or found running on
+// page load) and stops itself at the end.
+let fwWatchTimer = null;
+let fwWatchOp = "";
+let fwWatchExpect = false;
+function fwWatchStart(expect) {
+  if (expect) fwWatchExpect = true;
+  if (fwWatchTimer) return;
+  fwWatchTimer = setInterval(fwWatchTick, 3000);
+  fwWatchTick();
+}
+function fwWatchStop() {
+  if (fwWatchTimer) { clearInterval(fwWatchTimer); fwWatchTimer = null; }
+  fwWatchOp = ""; fwWatchExpect = false;
+}
+async function fwWatchTick() {
+  let d;
+  try { d = await api("/api/firmware"); } catch (e) { return; }
+  if (d.op && d.op !== "idle") { fwWatchOp = d.op; return; }
+  // idle: either it never ran (page load, nothing to say), it just ended, or a start we
+  // were told to expect already ended before the first look
+  const op = fwWatchOp || (fwWatchExpect && d.result ? d.last_op : "");
+  fwWatchStop();
+  if (op && d.result) fwAnnounceEnd(op, d);
+}
+function fwAnnounceEnd(op, d) {
+  try { if (navigator.vibrate) navigator.vibrate([250, 120, 250]); } catch (e) {}
+  const name = d.current || "";
+  if (d.result === "ok") {
+    noticeDialog(t(op === "writing" ? "fw.doneWrite" : "fw.doneRead"), name,
+      { kind: "ok", remind: t("fw.ignitionCycle") });
+  } else if (d.result === "cancelled") {
+    noticeDialog(t("fw.cancelled"), name, { kind: "ok" });
+  } else {
+    noticeDialog(t("fw.failedTitle"), [name, d.progress || ""].filter(Boolean).join("\n"),
+      { kind: "err" });
+  }
+}
+
 // The bar belongs to the button that started the operation, and outlives it: the
 // board reports `op: idle` the moment the util exits, so a finished read has to
 // keep showing its 100 % (and a failed one the number it died at) until the next
@@ -3350,6 +3429,7 @@ $("#fwReadBtn").addEventListener("click", async () => {
   const verbose = $("#fwVerbose").checked;
   try {
     await api("/api/firmware/read", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: $("#fwReadName").value.trim(), verbose }) });
+    fwWatchStart(true);
     loadFirmware();
   } catch (e) { toastErr(e); }
 });
@@ -3366,6 +3446,7 @@ $("#fwWriteBtn").addEventListener("click", async () => {
   const verbose = $("#fwVerbose").checked;
   try {
     await api("/api/firmware/write", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, verbose }) });
+    fwWatchStart(true);
     loadFirmware();
   } catch (e) {
     // every one of these is an i18n key now: the plain errors, the guard
@@ -3592,6 +3673,7 @@ async function init() {
   // tab too (mapped channels render as text), so fetch them at boot
   loadActuators();
   loadAddons();
+  fwWatchStart(false);     // a page opened mid-operation still announces its end
   connectWS();
 }
 init();

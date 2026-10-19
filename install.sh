@@ -44,11 +44,14 @@ python3 -m venv "$DEST/.venv"
 log "build 5am_util (firmware read/write, denandz/5am_util)"
 SRC5AM=/opt/5am_util-src
 if [ -d "$SRC5AM/.git" ]; then
+  git -C "$SRC5AM" checkout -- main.c || true   # drop our patch so the pull is clean
   git -C "$SRC5AM" pull --ff-only || true
 else
   rm -rf "$SRC5AM"
   git clone --depth 1 https://github.com/denandz/5am_util "$SRC5AM"
 fi
+# first-reply-byte wait: the native UART needs it, a fast ECU pays nothing for it
+patch -p1 -d "$SRC5AM" < "$DEST/patches/5am_util-first-wait.patch"
 make -C "$SRC5AM" clean >/dev/null 2>&1 || true
 make -C "$SRC5AM"
 mkdir -p "$DEST/bin"
